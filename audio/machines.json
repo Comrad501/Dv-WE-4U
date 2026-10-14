@@ -1,0 +1,1075 @@
+{
+ "family": "machines",
+ "generator": "audio/synth_machines.py",
+ "format": "mono, 44100 Hz, 16 bit PCM, peak at or under -3 dBFS; loops at -20 dBFS rms (less where the peaks would pass the limit), periodic by construction (no crossfade); one-shots with their peak at the limit",
+ "seed": 30307,
+ "notes": [
+  "No ear has judged these clips: they were made and checked by numbers and spectrograms only.",
+  "Fans: the blade tone is 275 Hz * value, the simulator's own law at its 600 A (0.45 Hz an ampere there: 180 Hz at 400 A, 270 at 600, 338 at 750). If the value 1.0 should mean the simulator's 3300 /min on an 8-bladed fan (440 Hz), multiply every fan pitch by 1.6 and divide the values the bank is made at by 1.6.",
+  "Fans: the port has no inertia today (it jumps with every notch). Give it about 1.5 s up and 5 s down before the audio reads it.",
+  "Converter: the present port is a straight 4 s ramp both ways; the curves in pitch_points / volume_points bend it into the measured run-up. Better: let the mod write the true speed (and a long coasting down) and use the _true_speed points.",
+  "One-shots are all at the peak limit; their loudness against one another is set by each reader's volume in the prefab."
+ ],
+ "clips": [
+  {
+   "name": "fan_slow",
+   "kind": "loop",
+   "seconds": 5.0,
+   "machine": "starting-resistor fans (all of them, one clip)",
+   "follows": "eu07.RESISTOR_FAN_SPEED, 0..1.5 (1 = rated volts on the fan motors), given the fans' inertia first",
+   "synthesised_at": 0.3724,
+   "blade_tone_hz": 102.4,
+   "shaft_rev_per_s": 12.8,
+   "pitch_law": "pitch = 2.6855 * value (the blade tone is then 275 Hz * value in every loop of the bank)",
+   "pitch_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     1.343
+    ],
+    [
+     1.0,
+     2.686
+    ],
+    [
+     1.5,
+     4.028
+    ]
+   ],
+   "volume_law": "equal-power crossfade to the neighbours in the bank (made at 0.37, 0.62, 1.0, 1.5), times (value / 1.5) ** 1.2",
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.039
+    ],
+    [
+     0.2,
+     0.089
+    ],
+    [
+     0.37,
+     0.186
+    ],
+    [
+     0.45,
+     0.207
+    ],
+    [
+     0.535,
+     0.148
+    ],
+    [
+     0.62,
+     0.0
+    ],
+    [
+     0.75,
+     0.0
+    ],
+    [
+     0.87,
+     0.0
+    ],
+    [
+     1.0,
+     0.0
+    ],
+    [
+     1.17,
+     0.0
+    ],
+    [
+     1.33,
+     0.0
+    ],
+    [
+     1.5,
+     0.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -9.0
+  },
+  {
+   "name": "fan_medium",
+   "kind": "loop",
+   "seconds": 5.0,
+   "machine": "starting-resistor fans (all of them, one clip)",
+   "follows": "eu07.RESISTOR_FAN_SPEED, 0..1.5 (1 = rated volts on the fan motors), given the fans' inertia first",
+   "synthesised_at": 0.6225,
+   "blade_tone_hz": 171.2,
+   "shaft_rev_per_s": 21.4,
+   "pitch_law": "pitch = 1.6063 * value (the blade tone is then 275 Hz * value in every loop of the bank)",
+   "pitch_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.803
+    ],
+    [
+     1.0,
+     1.606
+    ],
+    [
+     1.5,
+     2.409
+    ]
+   ],
+   "volume_law": "equal-power crossfade to the neighbours in the bank (made at 0.37, 0.62, 1.0, 1.5), times (value / 1.5) ** 1.2",
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.0
+    ],
+    [
+     0.2,
+     0.0
+    ],
+    [
+     0.37,
+     0.0
+    ],
+    [
+     0.45,
+     0.114
+    ],
+    [
+     0.535,
+     0.25
+    ],
+    [
+     0.62,
+     0.346
+    ],
+    [
+     0.75,
+     0.374
+    ],
+    [
+     0.87,
+     0.266
+    ],
+    [
+     1.0,
+     0.0
+    ],
+    [
+     1.17,
+     0.0
+    ],
+    [
+     1.33,
+     0.0
+    ],
+    [
+     1.5,
+     0.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -8.3
+  },
+  {
+   "name": "fan_fast",
+   "kind": "loop",
+   "seconds": 5.0,
+   "machine": "starting-resistor fans (all of them, one clip)",
+   "follows": "eu07.RESISTOR_FAN_SPEED, 0..1.5 (1 = rated volts on the fan motors), given the fans' inertia first",
+   "synthesised_at": 1.0007,
+   "blade_tone_hz": 275.2,
+   "shaft_rev_per_s": 34.4,
+   "pitch_law": "pitch = 0.9993 * value (the blade tone is then 275 Hz * value in every loop of the bank)",
+   "pitch_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.5
+    ],
+    [
+     1.0,
+     0.999
+    ],
+    [
+     1.5,
+     1.499
+    ]
+   ],
+   "volume_law": "equal-power crossfade to the neighbours in the bank (made at 0.37, 0.62, 1.0, 1.5), times (value / 1.5) ** 1.2",
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.0
+    ],
+    [
+     0.2,
+     0.0
+    ],
+    [
+     0.37,
+     0.0
+    ],
+    [
+     0.45,
+     0.0
+    ],
+    [
+     0.535,
+     0.0
+    ],
+    [
+     0.62,
+     0.0
+    ],
+    [
+     0.75,
+     0.223
+    ],
+    [
+     0.87,
+     0.447
+    ],
+    [
+     1.0,
+     0.615
+    ],
+    [
+     1.17,
+     0.639
+    ],
+    [
+     1.33,
+     0.441
+    ],
+    [
+     1.5,
+     0.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -7.6
+  },
+  {
+   "name": "fan_flat_out",
+   "kind": "loop",
+   "seconds": 5.0,
+   "machine": "starting-resistor fans (all of them, one clip)",
+   "follows": "eu07.RESISTOR_FAN_SPEED, 0..1.5 (1 = rated volts on the fan motors), given the fans' inertia first",
+   "synthesised_at": 1.5011,
+   "blade_tone_hz": 412.8,
+   "shaft_rev_per_s": 51.6,
+   "pitch_law": "pitch = 0.6662 * value (the blade tone is then 275 Hz * value in every loop of the bank)",
+   "pitch_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.333
+    ],
+    [
+     1.0,
+     0.666
+    ],
+    [
+     1.5,
+     0.999
+    ]
+   ],
+   "volume_law": "equal-power crossfade to the neighbours in the bank (made at 0.37, 0.62, 1.0, 1.5), times (value / 1.5) ** 1.2",
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.0
+    ],
+    [
+     0.2,
+     0.0
+    ],
+    [
+     0.37,
+     0.0
+    ],
+    [
+     0.45,
+     0.0
+    ],
+    [
+     0.535,
+     0.0
+    ],
+    [
+     0.62,
+     0.0
+    ],
+    [
+     0.75,
+     0.0
+    ],
+    [
+     0.87,
+     0.0
+    ],
+    [
+     1.0,
+     0.0
+    ],
+    [
+     1.17,
+     0.378
+    ],
+    [
+     1.33,
+     0.745
+    ],
+    [
+     1.5,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -7.1
+  },
+  {
+   "name": "converter_run",
+   "kind": "loop",
+   "seconds": 5.0,
+   "machine": "rotary converters (the pair, one clip) with the traction motor blowers on their shafts",
+   "follows": "eu07.CONVERTER_SPEED, 0..1",
+   "synthesised_at": 1.0,
+   "shaft_rev_per_s": 28.0,
+   "pitch_law": "pitch = speed, never under 0.2: IF the value is the true share of full speed (running up as 1 - exp(-(t / 1.2 s) ** 1.5), coasting down as exp(-t / 18 s)) pitch = value; on the present straight 4 s ramp, with speed = 1 - exp(-(4 * value / 1.2) ** 1.5) (pitch_points)",
+   "volume_law": "speed ** 2.5: IF the value is the true share of full speed (running up as 1 - exp(-(t / 1.2 s) ** 1.5), coasting down as exp(-t / 18 s)) volume = value ** 2.5; on the present straight 4 s ramp, with speed = 1 - exp(-(4 * value / 1.2) ** 1.5) (volume_points)",
+   "pitch_points": [
+    [
+     0.0,
+     0.2
+    ],
+    [
+     0.05,
+     0.2
+    ],
+    [
+     0.1,
+     0.2
+    ],
+    [
+     0.15,
+     0.298
+    ],
+    [
+     0.2,
+     0.42
+    ],
+    [
+     0.25,
+     0.533
+    ],
+    [
+     0.3,
+     0.632
+    ],
+    [
+     0.4,
+     0.786
+    ],
+    [
+     0.5,
+     0.884
+    ],
+    [
+     0.6,
+     0.941
+    ],
+    [
+     0.7,
+     0.972
+    ],
+    [
+     0.8,
+     0.987
+    ],
+    [
+     1.0,
+     0.998
+    ]
+   ],
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.05,
+     0.001
+    ],
+    [
+     0.1,
+     0.013
+    ],
+    [
+     0.15,
+     0.048
+    ],
+    [
+     0.2,
+     0.114
+    ],
+    [
+     0.25,
+     0.207
+    ],
+    [
+     0.3,
+     0.318
+    ],
+    [
+     0.4,
+     0.547
+    ],
+    [
+     0.5,
+     0.734
+    ],
+    [
+     0.6,
+     0.859
+    ],
+    [
+     0.7,
+     0.931
+    ],
+    [
+     0.8,
+     0.968
+    ],
+    [
+     1.0,
+     0.994
+    ]
+   ],
+   "pitch_points_true_speed": [
+    [
+     0.0,
+     0.2
+    ],
+    [
+     0.1,
+     0.2
+    ],
+    [
+     0.2,
+     0.2
+    ],
+    [
+     0.3,
+     0.3
+    ],
+    [
+     0.4,
+     0.4
+    ],
+    [
+     0.5,
+     0.5
+    ],
+    [
+     0.6,
+     0.6
+    ],
+    [
+     0.7,
+     0.7
+    ],
+    [
+     0.8,
+     0.8
+    ],
+    [
+     0.9,
+     0.9
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "volume_points_true_speed": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.003
+    ],
+    [
+     0.2,
+     0.018
+    ],
+    [
+     0.3,
+     0.049
+    ],
+    [
+     0.4,
+     0.101
+    ],
+    [
+     0.5,
+     0.177
+    ],
+    [
+     0.6,
+     0.279
+    ],
+    [
+     0.7,
+     0.41
+    ],
+    [
+     0.8,
+     0.572
+    ],
+    [
+     0.9,
+     0.768
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -7.5
+  },
+  {
+   "name": "converter_whine",
+   "kind": "loop",
+   "seconds": 5.0,
+   "machine": "rotary converter: its whine alone, a second layer beside converter_run for running up and down (optional)",
+   "follows": "eu07.CONVERTER_SPEED, 0..1",
+   "synthesised_at": 1.0,
+   "shaft_rev_per_s": 28.0,
+   "pitch_law": "the same as converter_run",
+   "volume_law": "0.08 of converter_run's full volume from 0.38 to 0.75 of the true speed, nothing under 0.2 and nothing at full speed (volume_points: against the present straight ramp's value)",
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.05,
+     0.0
+    ],
+    [
+     0.1,
+     0.0
+    ],
+    [
+     0.15,
+     0.043
+    ],
+    [
+     0.2,
+     0.08
+    ],
+    [
+     0.25,
+     0.08
+    ],
+    [
+     0.3,
+     0.08
+    ],
+    [
+     0.4,
+     0.072
+    ],
+    [
+     0.5,
+     0.05
+    ],
+    [
+     0.6,
+     0.034
+    ],
+    [
+     0.7,
+     0.016
+    ],
+    [
+     0.8,
+     0.007
+    ],
+    [
+     1.0,
+     0.001
+    ]
+   ],
+   "volume_points_true_speed": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.0
+    ],
+    [
+     0.2,
+     0.0
+    ],
+    [
+     0.3,
+     0.044
+    ],
+    [
+     0.4,
+     0.08
+    ],
+    [
+     0.5,
+     0.08
+    ],
+    [
+     0.6,
+     0.08
+    ],
+    [
+     0.7,
+     0.08
+    ],
+    [
+     0.8,
+     0.069
+    ],
+    [
+     0.9,
+     0.047
+    ],
+    [
+     1.0,
+     0.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -11.0
+  },
+  {
+   "name": "converter_start_1",
+   "kind": "one-shot",
+   "seconds": 1.393,
+   "machine": "rotary converter: its contactor closing, the inrush (the wire's 100 and 300 Hz in the motor), the first turns",
+   "follows": "eu07.CONVERTER_SPEED rising through 0.01",
+   "rms_dbfs": -23.9,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "converter_start_2",
+   "kind": "one-shot",
+   "seconds": 1.551,
+   "machine": "rotary converter: its contactor closing, the inrush (the wire's 100 and 300 Hz in the motor), the first turns",
+   "follows": "eu07.CONVERTER_SPEED rising through 0.01",
+   "rms_dbfs": -24.5,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "converter_start_3",
+   "kind": "one-shot",
+   "seconds": 1.651,
+   "machine": "rotary converter: its contactor closing, the inrush (the wire's 100 and 300 Hz in the motor), the first turns",
+   "follows": "eu07.CONVERTER_SPEED rising through 0.01",
+   "rms_dbfs": -22.9,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_run",
+   "kind": "loop",
+   "seconds": 4.0,
+   "machine": "main compressor (one clip for both; start them at random places and 3 % apart in pitch)",
+   "follows": "eu07.COMPRESSOR_1_SPEED / eu07.COMPRESSOR_2_SPEED, 0..1",
+   "synthesised_at": 1.0,
+   "crank_rev_per_s": 16.25,
+   "pitch_law": "pitch = 0.5 + 0.5 * value",
+   "volume_law": "value ** 0.7",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.1,
+     0.2
+    ],
+    [
+     0.25,
+     0.379
+    ],
+    [
+     0.5,
+     0.616
+    ],
+    [
+     0.75,
+     0.818
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -5.4
+  },
+  {
+   "name": "compressor_start_1",
+   "kind": "one-shot",
+   "seconds": 0.535,
+   "machine": "main compressor: its contactor and the motor's inrush",
+   "follows": "eu07.COMPRESSOR_n_SPEED rising through 0.02",
+   "rms_dbfs": -20.6,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_start_2",
+   "kind": "one-shot",
+   "seconds": 0.614,
+   "machine": "main compressor: its contactor and the motor's inrush",
+   "follows": "eu07.COMPRESSOR_n_SPEED rising through 0.02",
+   "rms_dbfs": -20.5,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_start_3",
+   "kind": "one-shot",
+   "seconds": 0.664,
+   "machine": "main compressor: its contactor and the motor's inrush",
+   "follows": "eu07.COMPRESSOR_n_SPEED rising through 0.02",
+   "rms_dbfs": -21.8,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_stop_1",
+   "kind": "one-shot",
+   "seconds": 0.41,
+   "machine": "main compressor: its contactor opening, the crank rocking back",
+   "follows": "eu07.COMPRESSOR_n_SPEED falling through 0.9",
+   "rms_dbfs": -27.3,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_stop_2",
+   "kind": "one-shot",
+   "seconds": 0.356,
+   "machine": "main compressor: its contactor opening, the crank rocking back",
+   "follows": "eu07.COMPRESSOR_n_SPEED falling through 0.9",
+   "rms_dbfs": -25.9,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_stop_3",
+   "kind": "one-shot",
+   "seconds": 0.348,
+   "machine": "main compressor: its contactor opening, the crank rocking back",
+   "follows": "eu07.COMPRESSOR_n_SPEED falling through 0.9",
+   "rms_dbfs": -23.3,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_unload_1",
+   "kind": "one-shot",
+   "seconds": 0.943,
+   "machine": "main compressor: the unloader blowing the delivery pipe down at cut-out",
+   "follows": "eu07.COMPRESSOR_UNLOAD, a pulse when the pressure switch (not the driver, not a relay) stops the compressors",
+   "rms_dbfs": -26.6,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_unload_2",
+   "kind": "one-shot",
+   "seconds": 0.927,
+   "machine": "main compressor: the unloader blowing the delivery pipe down at cut-out",
+   "follows": "eu07.COMPRESSOR_UNLOAD, a pulse when the pressure switch (not the driver, not a relay) stops the compressors",
+   "rms_dbfs": -25.0,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "compressor_unload_3",
+   "kind": "one-shot",
+   "seconds": 1.046,
+   "machine": "main compressor: the unloader blowing the delivery pipe down at cut-out",
+   "follows": "eu07.COMPRESSOR_UNLOAD, a pulse when the pressure switch (not the driver, not a relay) stops the compressors",
+   "rms_dbfs": -26.2,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "aux_compressor_run",
+   "kind": "loop",
+   "seconds": 4.0,
+   "machine": "small auxiliary (pantograph) compressor",
+   "follows": "an auxiliary compressor speed, 0..1 (no port yet)",
+   "synthesised_at": 1.0,
+   "crank_rev_per_s": 21.25,
+   "pitch_law": "pitch = 0.6 + 0.4 * value",
+   "volume_law": "value",
+   "pitch_points": [
+    [
+     0.0,
+     0.6
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.5,
+     0.5
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -6.5
+  },
+  {
+   "name": "panto_valve_up_1",
+   "kind": "one-shot",
+   "seconds": 1.115,
+   "machine": "pantograph: valve picks up, air into the cylinder",
+   "follows": "the pantograph's switch going on, with air to lift it",
+   "rms_dbfs": -24.1,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_valve_up_2",
+   "kind": "one-shot",
+   "seconds": 0.972,
+   "machine": "pantograph: valve picks up, air into the cylinder",
+   "follows": "the pantograph's switch going on, with air to lift it",
+   "rms_dbfs": -23.2,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_contact_1",
+   "kind": "one-shot",
+   "seconds": 0.543,
+   "machine": "pantograph: the pan meets the wire",
+   "follows": "the pantograph reaching the wire",
+   "rms_dbfs": -26.1,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_contact_2",
+   "kind": "one-shot",
+   "seconds": 0.545,
+   "machine": "pantograph: the pan meets the wire",
+   "follows": "the pantograph reaching the wire",
+   "rms_dbfs": -28.8,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_contact_3",
+   "kind": "one-shot",
+   "seconds": 0.552,
+   "machine": "pantograph: the pan meets the wire",
+   "follows": "the pantograph reaching the wire",
+   "rms_dbfs": -28.3,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_valve_down_1",
+   "kind": "one-shot",
+   "seconds": 1.001,
+   "machine": "pantograph: valve drops, the cylinder empties",
+   "follows": "the pantograph's switch going off",
+   "rms_dbfs": -23.2,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_valve_down_2",
+   "kind": "one-shot",
+   "seconds": 1.016,
+   "machine": "pantograph: valve drops, the cylinder empties",
+   "follows": "the pantograph's switch going off",
+   "rms_dbfs": -23.1,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_drop_1",
+   "kind": "one-shot",
+   "seconds": 0.952,
+   "machine": "pantograph: the frame lands on its stops",
+   "follows": "the pantograph reaching its lowered position",
+   "rms_dbfs": -24.1,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_drop_2",
+   "kind": "one-shot",
+   "seconds": 0.927,
+   "machine": "pantograph: the frame lands on its stops",
+   "follows": "the pantograph reaching its lowered position",
+   "rms_dbfs": -23.9,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "panto_drop_3",
+   "kind": "one-shot",
+   "seconds": 0.96,
+   "machine": "pantograph: the frame lands on its stops",
+   "follows": "the pantograph reaching its lowered position",
+   "rms_dbfs": -22.7,
+   "peak_dbfs": -3.0
+  },
+  {
+   "name": "horn_low",
+   "kind": "loop",
+   "seconds": 2.0,
+   "machine": "air horn, 370 Hz (ASSUMED, not measured)",
+   "follows": "the horn valve's lever to that side, with air in the main reservoir",
+   "pitch_law": "a little flat while it speaks and as it dies",
+   "volume_law": "the lever's travel",
+   "pitch_points": [
+    [
+     0.0,
+     0.93
+    ],
+    [
+     0.5,
+     0.99
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.15,
+     0.35
+    ],
+    [
+     0.5,
+     0.8
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -11.0,
+   "peak_dbfs": -7.0
+  },
+  {
+   "name": "horn_high",
+   "kind": "loop",
+   "seconds": 2.0,
+   "machine": "air horn, 660 Hz (ASSUMED, not measured)",
+   "follows": "the horn valve's lever to that side, with air in the main reservoir",
+   "pitch_law": "a little flat while it speaks and as it dies",
+   "volume_law": "the lever's travel",
+   "pitch_points": [
+    [
+     0.0,
+     0.93
+    ],
+    [
+     0.5,
+     0.99
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     0.15,
+     0.35
+    ],
+    [
+     0.5,
+     0.8
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -11.0,
+   "peak_dbfs": -7.0
+  },
+  {
+   "name": "sanding_loop",
+   "kind": "loop",
+   "seconds": 3.0,
+   "machine": "sanding: air and grit down the pipes to the wheels (ASSUMED, not measured)",
+   "follows": "sander.SAND_FLOW, 0..1",
+   "volume_law": "the flow",
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "rms_dbfs": -20.0,
+   "peak_dbfs": -5.2
+  }
+ ]
+}

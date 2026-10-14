@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		The EU07's simulation as a Unity Mod Manager mod.
+
+		Needs the .NET 10 SDK (the solver sources use C# 14) and Derail Valley's own
+		assemblies: put the path to DerailValley_Data\Managed in Directory.Build.props
+		beside this file, as <GameManaged>. See README.md here.
+
+		Debug carries the bench (bench/eu07_bench.cs); Release is what goes in Mods.
+	-->
+	<PropertyGroup>
+		<AssemblyName>dv_eu07</AssemblyName>
+		<RootNamespace>electric_sim</RootNamespace>
+		<TargetFramework>net48</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<WarningsAsErrors>CS8600;CS8602;CS8603</WarningsAsErrors>
+		<NoWarn>1701;1702;0649;8981;0414</NoWarn>
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<!-- the dll names its sources from the repository's root, not from wherever it was built -->
+		<PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))=EU07\</PathMap>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Include="*.cs" />
+		<Compile Include="knsgf\**\*.cs" />
+		<Compile Include="..\eu07_*.cs" Link="eu07\%(Filename)%(Extension)" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(Configuration)' == 'Debug'">
+		<Compile Include="..\bench\eu07_bench.cs" Link="bench\eu07_bench.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="Assembly-CSharp"><HintPath>$(GameManaged)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="DV.BrakeSystem"><HintPath>$(GameManaged)\DV.BrakeSystem.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="DV.Interaction"><HintPath>$(GameManaged)\DV.Interaction.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine.PhysicsModule"><HintPath>$(GameManaged)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="DV.Simulation"><HintPath>$(GameManaged)\DV.Simulation.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="DV.ThingTypes"><HintPath>$(GameManaged)\DV.ThingTypes.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="DV.Utils"><HintPath>$(GameManaged)\DV.Utils.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine"><HintPath>$(GameManaged)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine.AudioModule"><HintPath>$(GameManaged)\UnityEngine.AudioModule.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine.CoreModule"><HintPath>$(GameManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine.IMGUIModule"><HintPath>$(GameManaged)\UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(GameManaged)\UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(GameManaged)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="UnityModManager"><HintPath>$(GameManaged)\UnityModManager\UnityModManager.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="Newtonsoft.Json"><HintPath>$(GameManaged)\Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+		<Reference Include="0Harmony"><HintPath>$(GameManaged)\UnityModManager\0Harmony.dll</HintPath><Private>false</Private></Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+		<PackageReference Include="Nullable" Version="1.3.1" PrivateAssets="all" />
+	</ItemGroup>
+</Project>

@@ -1,0 +1,12 @@
+{
+	"Id": "EU07Electrics",
+	"Version": "0.1.0",
+	"DisplayName": "WE-4U (EU07) electrics",
+	"Author": "Comrad_501",
+	"AssemblyName": "dv_eu07.dll",
+	"EntryMethod": "electric_sim.eu07_mod.Load",
+	"ManagerVersion": "0.27.3",
+	"Requirements": [
+		"DVCustomCarLoader"
+	]
+}

@@ -1,0 +1,51 @@
+# the schematics and anything read out of them
+sheet*.json
+*.pdf
+*.png
+__pycache__/
+
+# build output, machine-specific paths
+build/
+mod/bin/
+mod/obj/
+mod/Directory.Build.props
+bench/runner/bin/
+bench/runner/obj/
+
+# the Unity project: only our editor script is ours. Custom Car Loader's tools, Knsgf's
+# add-on and his example railcar come from their own releases (unity/README.md), and
+# the EU07 assets are generated from them on every build.
+unity/Library/
+unity/Temp/
+unity/Logs/
+unity/obj/
+unity/*.csproj
+unity/*.sln
+unity/Assets/CarCreator/
+unity/Assets/CarCreator.meta
+unity/Assets/CatenaryAddon/
+unity/Assets/CatenaryAddon.meta
+unity/Assets/Scenes/
+unity/Assets/Scenes.meta
+unity/Assets/_CCL_CARS/
+unity/Assets/_CCL_CARS.meta
+unity/Packages/
+unity/ProjectSettings/
+
+# other people's models and photographs, to look at only
+reference/
+
+# scratch output of the model scripts
+model/out/
+
+# the paint: what the model's build bakes and keeps (model/eu07_blockout.py --bake) and the
+# textures tools/paint.py makes of it - large, and made again from the scripts
+model/paint_bake/
+model/paint/
+
+# generated on every run
+bench/bench_output.txt
+main_circuit_netlist.json
+
+# release packages
+release/

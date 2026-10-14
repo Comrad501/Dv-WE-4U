@@ -1,0 +1,1601 @@
+{
+ "family": "motors",
+ "generator": "audio/synth_motors.py",
+ "format": "mono, 44100 Hz, 16 bit PCM, every clip at peak -3 dBFS, no DC; loops are periodic by construction (no cross-fade at the join)",
+ "values": {
+  "speed": "km/h, absolute, from the MOTORS' turning rate: 125 x eu07.MOTOR_SPEED (0..1 = |motor rev/min| / 2328, the rate at 125 km/h on a 1250 mm wheel). All points below have km/h on their x axis. traction.WHEEL_SPEED_KMH_EXT_IN serves too, but then a slipping axle does not rise in pitch",
+  "load": "eu07.MOTOR_LOAD, 0..1 = |current of one motor| / 600 A, clamped"
+ },
+ "physics": {
+  "wheel_mm": 1250.0,
+  "gear": "79:18",
+  "mesh_hz_per_kmh": 5.5881,
+  "mesh_hz_at_125": 698.5,
+  "motor_rev_min_at_125": 2328.0,
+  "slot_order_assumed": 62,
+  "slot_hz_per_kmh": 19.248,
+  "ripple_hz": 300.0
+ },
+ "layers": [
+  {
+   "object": "MotorsGear",
+   "clips": [
+    "motor_gear_005",
+    "motor_gear_009",
+    "motor_gear_016",
+    "motor_gear_028",
+    "motor_gear_050",
+    "motor_gear_088"
+   ],
+   "speed_reader": "SET_VOLUME_AND_PITCH, x = km/h; each layer with its own volume curve and pitch curve (usePitchCurve) from the points",
+   "master_volume": {
+    "offset": 0.25,
+    "per_load": 0.75
+   },
+   "load_reader": "SET_MASTER_VOLUME = 0.25 + 0.75 x load"
+  },
+  {
+   "object": "MotorsLoad",
+   "clips": [
+    "motor_load_005",
+    "motor_load_009",
+    "motor_load_016",
+    "motor_load_028",
+    "motor_load_050",
+    "motor_load_088",
+    "motor_hum_stall"
+   ],
+   "speed_reader": "SET_VOLUME_AND_PITCH, x = km/h",
+   "master_volume": {
+    "offset": 0.0,
+    "per_load": 1.0
+   },
+   "load_reader": "SET_MASTER_VOLUME = load (the layer's share against the gear, 0.5, is in its points)"
+  },
+  {
+   "object": "MotorsAir",
+   "clips": [
+    "motor_air"
+   ],
+   "speed_reader": "SET_VOLUME_AND_PITCH, x = km/h",
+   "master_volume": {
+    "offset": 1.0,
+    "per_load": 0.0
+   },
+   "load_reader": "none"
+  }
+ ],
+ "cross_fades_kmh": [
+  [
+   5.0,
+   9.0
+  ],
+  [
+   9.0,
+   16.0
+  ],
+  [
+   16.0,
+   28.0
+  ],
+  [
+   28.0,
+   50.0
+  ],
+  [
+   50.0,
+   88.0
+  ]
+ ],
+ "notes": [
+  "No ear has judged these sounds: they were made and checked by numbers and spectrograms only.",
+  "The shares and exponents under 'how the game should play it' in the generator are first guesses for an ear to tune; the points here follow from them.",
+  "Volume points are source volumes: the largest is 1 and every master volume reaches 1 at full current, so the family can be turned down but not up.",
+  "Two loops of a bank layer always play together (one alone only at its own design speed). A loop's colour is baked in at its design speed and moves with its pitch; cross-fading over the whole step keeps the colour of the mix from stepping back at each seam.",
+  "The mesh tone is 79 a wheel turn on a 1250 mm tyre: 5.588 Hz for each km/h. On worn tyres (1180 mm) it is 6 % higher; multiply every pitch by up to 1.06 for that.",
+  "62 armature slots is an assumption. It is not from the DTR."
+ ],
+ "clips": [
+  {
+   "name": "motor_gear_005",
+   "kind": "loop",
+   "seconds": 5.655,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -19.12,
+   "a_weighted_dbfs": -26.15,
+   "machine": "four EE541 traction motors and their 79:18 gears: the gear (what turns)",
+   "layer": "MotorsGear",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 5.0,
+    "mesh_hz": 27.94,
+    "motor_rev_s": 1.552,
+    "wheel_rev_s": 0.3537,
+    "slot_hz": 96.2,
+    "wheel_turns_in_loop": 2
+   },
+   "serves_kmh": [
+    0.0,
+    9.0
+   ],
+   "alone_kmh": [
+    0.0,
+    5.0
+   ],
+   "pitch_law": "pitch = km/h / 5, held at 0.5 below 2.5 km/h (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     2.5,
+     0.5
+    ],
+    [
+     9.0,
+     1.8
+    ],
+    [
+     125.0,
+     1.8
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed) x (v/125)^0.3, fading in over 0..3 km/h",
+   "trim": 1.4505,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     3.0,
+     0.5523
+    ],
+    [
+     5.0,
+     0.5523
+    ],
+    [
+     5.38,
+     0.5537
+    ],
+    [
+     5.79,
+     0.5332
+    ],
+    [
+     6.23,
+     0.4906
+    ],
+    [
+     6.71,
+     0.4265
+    ],
+    [
+     7.22,
+     0.3426
+    ],
+    [
+     7.77,
+     0.2412
+    ],
+    [
+     8.36,
+     0.1257
+    ],
+    [
+     9.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_gear_009",
+   "kind": "loop",
+   "seconds": 4.712,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -16.86,
+   "a_weighted_dbfs": -23.89,
+   "machine": "four EE541 traction motors and their 79:18 gears: the gear (what turns)",
+   "layer": "MotorsGear",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 9.0,
+    "mesh_hz": 50.29,
+    "motor_rev_s": 2.794,
+    "wheel_rev_s": 0.6366,
+    "slot_hz": 173.2,
+    "wheel_turns_in_loop": 3
+   },
+   "serves_kmh": [
+    5.0,
+    16.0
+   ],
+   "alone_kmh": [
+    9.0,
+    9.0
+   ],
+   "pitch_law": "pitch = km/h / 9 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     4.5,
+     0.5
+    ],
+    [
+     16.0,
+     1.778
+    ],
+    [
+     125.0,
+     1.778
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed) x (v/125)^0.3, fading in over 0..3 km/h",
+   "trim": 1.1182,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     5.0,
+     0.0
+    ],
+    [
+     5.38,
+     0.0849
+    ],
+    [
+     5.79,
+     0.1703
+    ],
+    [
+     6.23,
+     0.2527
+    ],
+    [
+     6.71,
+     0.3288
+    ],
+    [
+     7.22,
+     0.3952
+    ],
+    [
+     7.77,
+     0.449
+    ],
+    [
+     8.36,
+     0.4872
+    ],
+    [
+     9.0,
+     0.5078
+    ],
+    [
+     9.67,
+     0.5089
+    ],
+    [
+     10.39,
+     0.4899
+    ],
+    [
+     11.17,
+     0.4505
+    ],
+    [
+     12.0,
+     0.3915
+    ],
+    [
+     12.89,
+     0.3143
+    ],
+    [
+     13.86,
+     0.2212
+    ],
+    [
+     14.89,
+     0.1152
+    ],
+    [
+     16.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_gear_016",
+   "kind": "loop",
+   "seconds": 4.418,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -16.37,
+   "a_weighted_dbfs": -23.06,
+   "machine": "four EE541 traction motors and their 79:18 gears: the gear (what turns)",
+   "layer": "MotorsGear",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 16.0,
+    "mesh_hz": 89.41,
+    "motor_rev_s": 4.967,
+    "wheel_rev_s": 1.1318,
+    "slot_hz": 308.1,
+    "wheel_turns_in_loop": 5
+   },
+   "serves_kmh": [
+    9.0,
+    28.0
+   ],
+   "alone_kmh": [
+    16.0,
+    16.0
+   ],
+   "pitch_law": "pitch = km/h / 16 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     8.0,
+     0.5
+    ],
+    [
+     28.0,
+     1.75
+    ],
+    [
+     125.0,
+     1.75
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed) x (v/125)^0.3, fading in over 0..3 km/h",
+   "trim": 1.0163,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     9.0,
+     0.0
+    ],
+    [
+     9.67,
+     0.092
+    ],
+    [
+     10.39,
+     0.1844
+    ],
+    [
+     11.17,
+     0.2736
+    ],
+    [
+     12.0,
+     0.3558
+    ],
+    [
+     12.89,
+     0.4275
+    ],
+    [
+     13.86,
+     0.4854
+    ],
+    [
+     14.89,
+     0.5265
+    ],
+    [
+     16.0,
+     0.5485
+    ],
+    [
+     17.16,
+     0.5494
+    ],
+    [
+     18.4,
+     0.5285
+    ],
+    [
+     19.74,
+     0.4857
+    ],
+    [
+     21.17,
+     0.4218
+    ],
+    [
+     22.7,
+     0.3385
+    ],
+    [
+     24.34,
+     0.2381
+    ],
+    [
+     26.11,
+     0.1239
+    ],
+    [
+     28.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_gear_028",
+   "kind": "loop",
+   "seconds": 4.544,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -14.7,
+   "a_weighted_dbfs": -21.38,
+   "machine": "four EE541 traction motors and their 79:18 gears: the gear (what turns)",
+   "layer": "MotorsGear",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 28.0,
+    "mesh_hz": 156.47,
+    "motor_rev_s": 8.693,
+    "wheel_rev_s": 1.9806,
+    "slot_hz": 538.9,
+    "wheel_turns_in_loop": 9
+   },
+   "serves_kmh": [
+    16.0,
+    50.0
+   ],
+   "alone_kmh": [
+    28.0,
+    28.0
+   ],
+   "pitch_law": "pitch = km/h / 28 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     14.0,
+     0.5
+    ],
+    [
+     50.0,
+     1.786
+    ],
+    [
+     125.0,
+     1.786
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed) x (v/125)^0.3, fading in over 0..3 km/h",
+   "trim": 0.8376,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     16.0,
+     0.0
+    ],
+    [
+     17.16,
+     0.0901
+    ],
+    [
+     18.4,
+     0.1804
+    ],
+    [
+     19.74,
+     0.2675
+    ],
+    [
+     21.17,
+     0.3476
+    ],
+    [
+     22.7,
+     0.4175
+    ],
+    [
+     24.34,
+     0.4737
+    ],
+    [
+     26.11,
+     0.5135
+    ],
+    [
+     28.0,
+     0.5347
+    ],
+    [
+     30.1,
+     0.5359
+    ],
+    [
+     32.37,
+     0.5159
+    ],
+    [
+     34.8,
+     0.4745
+    ],
+    [
+     37.42,
+     0.4124
+    ],
+    [
+     40.23,
+     0.3312
+    ],
+    [
+     43.25,
+     0.2331
+    ],
+    [
+     46.5,
+     0.1215
+    ],
+    [
+     50.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_gear_050",
+   "kind": "loop",
+   "seconds": 4.524,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -15.91,
+   "a_weighted_dbfs": -22.63,
+   "machine": "four EE541 traction motors and their 79:18 gears: the gear (what turns)",
+   "layer": "MotorsGear",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 50.0,
+    "mesh_hz": 279.4,
+    "motor_rev_s": 15.522,
+    "wheel_rev_s": 3.5368,
+    "slot_hz": 962.4,
+    "wheel_turns_in_loop": 16
+   },
+   "serves_kmh": [
+    28.0,
+    88.0
+   ],
+   "alone_kmh": [
+    50.0,
+    50.0
+   ],
+   "pitch_law": "pitch = km/h / 50 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     25.0,
+     0.5
+    ],
+    [
+     88.0,
+     1.76
+    ],
+    [
+     125.0,
+     1.76
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed) x (v/125)^0.3, fading in over 0..3 km/h",
+   "trim": 0.9672,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     28.0,
+     0.0
+    ],
+    [
+     30.1,
+     0.1231
+    ],
+    [
+     32.37,
+     0.2468
+    ],
+    [
+     34.8,
+     0.3662
+    ],
+    [
+     37.42,
+     0.4763
+    ],
+    [
+     40.23,
+     0.5724
+    ],
+    [
+     43.25,
+     0.6499
+    ],
+    [
+     46.5,
+     0.7051
+    ],
+    [
+     50.0,
+     0.7348
+    ],
+    [
+     53.66,
+     0.7361
+    ],
+    [
+     57.59,
+     0.7082
+    ],
+    [
+     61.81,
+     0.6511
+    ],
+    [
+     66.33,
+     0.5655
+    ],
+    [
+     71.19,
+     0.4539
+    ],
+    [
+     76.4,
+     0.3193
+    ],
+    [
+     82.0,
+     0.1663
+    ],
+    [
+     88.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_gear_088",
+   "kind": "loop",
+   "seconds": 4.498,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -13.56,
+   "a_weighted_dbfs": -17.03,
+   "machine": "four EE541 traction motors and their 79:18 gears: the gear (what turns)",
+   "layer": "MotorsGear",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 88.0,
+    "mesh_hz": 491.75,
+    "motor_rev_s": 27.32,
+    "wheel_rev_s": 6.2247,
+    "slot_hz": 1693.8,
+    "wheel_turns_in_loop": 28
+   },
+   "serves_kmh": [
+    50.0,
+    125.0
+   ],
+   "alone_kmh": [
+    88.0,
+    125.0
+   ],
+   "pitch_law": "pitch = km/h / 88",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     44.0,
+     0.5
+    ],
+    [
+     125.0,
+     1.42
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed) x (v/125)^0.3, fading in over 0..3 km/h",
+   "trim": 0.5076,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     50.0,
+     0.0
+    ],
+    [
+     53.66,
+     0.0768
+    ],
+    [
+     57.59,
+     0.154
+    ],
+    [
+     61.81,
+     0.2283
+    ],
+    [
+     66.33,
+     0.2968
+    ],
+    [
+     71.19,
+     0.3565
+    ],
+    [
+     76.4,
+     0.4046
+    ],
+    [
+     82.0,
+     0.4387
+    ],
+    [
+     88.0,
+     0.4569
+    ],
+    [
+     125.0,
+     0.5076
+    ]
+   ]
+  },
+  {
+   "name": "motor_load_005",
+   "kind": "loop",
+   "seconds": 5.655,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -22.66,
+   "a_weighted_dbfs": -28.94,
+   "machine": "four EE541 traction motors and their 79:18 gears: what current adds (roughness, slot whine)",
+   "layer": "MotorsLoad",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 5.0,
+    "mesh_hz": 27.94,
+    "motor_rev_s": 1.552,
+    "wheel_rev_s": 0.3537,
+    "slot_hz": 96.2,
+    "wheel_turns_in_loop": 2
+   },
+   "serves_kmh": [
+    0.0,
+    9.0
+   ],
+   "alone_kmh": [
+    0.0,
+    5.0
+   ],
+   "pitch_law": "pitch = km/h / 5, held at 0.5 below 2.5 km/h (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     2.5,
+     0.5
+    ],
+    [
+     9.0,
+     1.8
+    ],
+    [
+     125.0,
+     1.8
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed); trim holds the layer's share, 0.5 of the gear layer's top, fading in over 0..3 km/h",
+   "trim": 1.0,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     3.0,
+     1.0
+    ],
+    [
+     5.0,
+     1.0
+    ],
+    [
+     5.38,
+     0.9808
+    ],
+    [
+     5.79,
+     0.9239
+    ],
+    [
+     6.23,
+     0.8315
+    ],
+    [
+     6.71,
+     0.7071
+    ],
+    [
+     7.22,
+     0.5556
+    ],
+    [
+     7.77,
+     0.3827
+    ],
+    [
+     8.36,
+     0.1951
+    ],
+    [
+     9.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_load_009",
+   "kind": "loop",
+   "seconds": 4.712,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -20.47,
+   "a_weighted_dbfs": -26.79,
+   "machine": "four EE541 traction motors and their 79:18 gears: what current adds (roughness, slot whine)",
+   "layer": "MotorsLoad",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 9.0,
+    "mesh_hz": 50.29,
+    "motor_rev_s": 2.794,
+    "wheel_rev_s": 0.6366,
+    "slot_hz": 173.2,
+    "wheel_turns_in_loop": 3
+   },
+   "serves_kmh": [
+    5.0,
+    16.0
+   ],
+   "alone_kmh": [
+    9.0,
+    9.0
+   ],
+   "pitch_law": "pitch = km/h / 9 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     4.5,
+     0.5
+    ],
+    [
+     16.0,
+     1.778
+    ],
+    [
+     125.0,
+     1.778
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed); trim holds the layer's share, 0.5 of the gear layer's top, fading in over 0..3 km/h",
+   "trim": 0.7807,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     5.0,
+     0.0
+    ],
+    [
+     5.38,
+     0.1523
+    ],
+    [
+     5.79,
+     0.2988
+    ],
+    [
+     6.23,
+     0.4337
+    ],
+    [
+     6.71,
+     0.5521
+    ],
+    [
+     7.22,
+     0.6492
+    ],
+    [
+     7.77,
+     0.7213
+    ],
+    [
+     8.36,
+     0.7657
+    ],
+    [
+     9.0,
+     0.7807
+    ],
+    [
+     9.67,
+     0.7657
+    ],
+    [
+     10.39,
+     0.7213
+    ],
+    [
+     11.17,
+     0.6492
+    ],
+    [
+     12.0,
+     0.5521
+    ],
+    [
+     12.89,
+     0.4337
+    ],
+    [
+     13.86,
+     0.2988
+    ],
+    [
+     14.89,
+     0.1523
+    ],
+    [
+     16.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_load_016",
+   "kind": "loop",
+   "seconds": 4.418,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -18.93,
+   "a_weighted_dbfs": -25.15,
+   "machine": "four EE541 traction motors and their 79:18 gears: what current adds (roughness, slot whine)",
+   "layer": "MotorsLoad",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 16.0,
+    "mesh_hz": 89.41,
+    "motor_rev_s": 4.967,
+    "wheel_rev_s": 1.1318,
+    "slot_hz": 308.1,
+    "wheel_turns_in_loop": 5
+   },
+   "serves_kmh": [
+    9.0,
+    28.0
+   ],
+   "alone_kmh": [
+    16.0,
+    16.0
+   ],
+   "pitch_law": "pitch = km/h / 16 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     8.0,
+     0.5
+    ],
+    [
+     28.0,
+     1.75
+    ],
+    [
+     125.0,
+     1.75
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed); trim holds the layer's share, 0.5 of the gear layer's top, fading in over 0..3 km/h",
+   "trim": 0.6464,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     9.0,
+     0.0
+    ],
+    [
+     9.67,
+     0.1261
+    ],
+    [
+     10.39,
+     0.2474
+    ],
+    [
+     11.17,
+     0.3591
+    ],
+    [
+     12.0,
+     0.4571
+    ],
+    [
+     12.89,
+     0.5375
+    ],
+    [
+     13.86,
+     0.5972
+    ],
+    [
+     14.89,
+     0.634
+    ],
+    [
+     16.0,
+     0.6464
+    ],
+    [
+     17.16,
+     0.634
+    ],
+    [
+     18.4,
+     0.5972
+    ],
+    [
+     19.74,
+     0.5375
+    ],
+    [
+     21.17,
+     0.4571
+    ],
+    [
+     22.7,
+     0.3591
+    ],
+    [
+     24.34,
+     0.2474
+    ],
+    [
+     26.11,
+     0.1261
+    ],
+    [
+     28.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_load_028",
+   "kind": "loop",
+   "seconds": 4.544,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -16.6,
+   "a_weighted_dbfs": -22.56,
+   "machine": "four EE541 traction motors and their 79:18 gears: what current adds (roughness, slot whine)",
+   "layer": "MotorsLoad",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 28.0,
+    "mesh_hz": 156.47,
+    "motor_rev_s": 8.693,
+    "wheel_rev_s": 1.9806,
+    "slot_hz": 538.9,
+    "wheel_turns_in_loop": 9
+   },
+   "serves_kmh": [
+    16.0,
+    50.0
+   ],
+   "alone_kmh": [
+    28.0,
+    28.0
+   ],
+   "pitch_law": "pitch = km/h / 28 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     14.0,
+     0.5
+    ],
+    [
+     50.0,
+     1.786
+    ],
+    [
+     125.0,
+     1.786
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed); trim holds the layer's share, 0.5 of the gear layer's top, fading in over 0..3 km/h",
+   "trim": 0.4797,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     16.0,
+     0.0
+    ],
+    [
+     17.16,
+     0.0936
+    ],
+    [
+     18.4,
+     0.1836
+    ],
+    [
+     19.74,
+     0.2665
+    ],
+    [
+     21.17,
+     0.3392
+    ],
+    [
+     22.7,
+     0.3989
+    ],
+    [
+     24.34,
+     0.4432
+    ],
+    [
+     26.11,
+     0.4705
+    ],
+    [
+     28.0,
+     0.4797
+    ],
+    [
+     30.1,
+     0.4705
+    ],
+    [
+     32.37,
+     0.4432
+    ],
+    [
+     34.8,
+     0.3989
+    ],
+    [
+     37.42,
+     0.3392
+    ],
+    [
+     40.23,
+     0.2665
+    ],
+    [
+     43.25,
+     0.1836
+    ],
+    [
+     46.5,
+     0.0936
+    ],
+    [
+     50.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_load_050",
+   "kind": "loop",
+   "seconds": 4.524,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -15.44,
+   "a_weighted_dbfs": -22.01,
+   "machine": "four EE541 traction motors and their 79:18 gears: what current adds (roughness, slot whine)",
+   "layer": "MotorsLoad",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 50.0,
+    "mesh_hz": 279.4,
+    "motor_rev_s": 15.522,
+    "wheel_rev_s": 3.5368,
+    "slot_hz": 962.4,
+    "wheel_turns_in_loop": 16
+   },
+   "serves_kmh": [
+    28.0,
+    88.0
+   ],
+   "alone_kmh": [
+    50.0,
+    50.0
+   ],
+   "pitch_law": "pitch = km/h / 50 (the points stop where the loop has faded out)",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     25.0,
+     0.5
+    ],
+    [
+     88.0,
+     1.76
+    ],
+    [
+     125.0,
+     1.76
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed); trim holds the layer's share, 0.5 of the gear layer's top, fading in over 0..3 km/h",
+   "trim": 0.4503,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     28.0,
+     0.0
+    ],
+    [
+     30.1,
+     0.0878
+    ],
+    [
+     32.37,
+     0.1723
+    ],
+    [
+     34.8,
+     0.2502
+    ],
+    [
+     37.42,
+     0.3184
+    ],
+    [
+     40.23,
+     0.3744
+    ],
+    [
+     43.25,
+     0.416
+    ],
+    [
+     46.5,
+     0.4416
+    ],
+    [
+     50.0,
+     0.4503
+    ],
+    [
+     53.66,
+     0.4416
+    ],
+    [
+     57.59,
+     0.416
+    ],
+    [
+     61.81,
+     0.3744
+    ],
+    [
+     66.33,
+     0.3184
+    ],
+    [
+     71.19,
+     0.2502
+    ],
+    [
+     76.4,
+     0.1723
+    ],
+    [
+     82.0,
+     0.0878
+    ],
+    [
+     88.0,
+     0.0
+    ],
+    [
+     125.0,
+     0.0
+    ]
+   ]
+  },
+  {
+   "name": "motor_load_088",
+   "kind": "loop",
+   "seconds": 4.498,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -15.52,
+   "a_weighted_dbfs": -18.96,
+   "machine": "four EE541 traction motors and their 79:18 gears: what current adds (roughness, slot whine)",
+   "layer": "MotorsLoad",
+   "follows": "speed (pitch, and its place in the bank); motor current through the layer's master volume",
+   "synthesised_at": {
+    "kmh": 88.0,
+    "mesh_hz": 491.75,
+    "motor_rev_s": 27.32,
+    "wheel_rev_s": 6.2247,
+    "slot_hz": 1693.8,
+    "wheel_turns_in_loop": 28
+   },
+   "serves_kmh": [
+    50.0,
+    125.0
+   ],
+   "alone_kmh": [
+    88.0,
+    125.0
+   ],
+   "pitch_law": "pitch = km/h / 88",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     44.0,
+     0.5
+    ],
+    [
+     125.0,
+     1.42
+    ]
+   ],
+   "volume_law": "trim x equal-power cross-fade to the neighbours (sine and cosine of the way from one design speed to the next, in log speed); trim holds the layer's share, 0.5 of the gear layer's top, fading in over 0..3 km/h",
+   "trim": 0.317,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     50.0,
+     0.0
+    ],
+    [
+     53.66,
+     0.0618
+    ],
+    [
+     57.59,
+     0.1213
+    ],
+    [
+     61.81,
+     0.1761
+    ],
+    [
+     66.33,
+     0.2241
+    ],
+    [
+     71.19,
+     0.2635
+    ],
+    [
+     76.4,
+     0.2928
+    ],
+    [
+     82.0,
+     0.3109
+    ],
+    [
+     88.0,
+     0.317
+    ],
+    [
+     125.0,
+     0.317
+    ]
+   ]
+  },
+  {
+   "name": "motor_hum_stall",
+   "kind": "loop",
+   "seconds": 4.0,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -11.19,
+   "a_weighted_dbfs": -16.86,
+   "machine": "the motors standing or creeping under current: substation ripple hum (300 Hz and multiples, weaker 100 Hz family)",
+   "layer": "MotorsLoad",
+   "follows": "motor current through the layer's master volume; speed only fades it under the turning sounds",
+   "synthesised_at": {
+    "kmh": 0.0,
+    "ripple_hz": 300.0
+   },
+   "pitch_law": "pitch = 1 at every speed (the supply does not change with speed)",
+   "pitch_points": [
+    [
+     0.0,
+     1.0
+    ],
+    [
+     125.0,
+     1.0
+    ]
+   ],
+   "volume_law": "0.4 of the load loops' level at standstill, fading with speed (points)",
+   "trim": 0.0996,
+   "volume_points": [
+    [
+     0.0,
+     0.0996
+    ],
+    [
+     3.0,
+     0.0996
+    ],
+    [
+     10.0,
+     0.0597
+    ],
+    [
+     30.0,
+     0.0299
+    ],
+    [
+     60.0,
+     0.0149
+    ],
+    [
+     125.0,
+     0.01
+    ]
+   ]
+  },
+  {
+   "name": "motor_air",
+   "kind": "loop",
+   "seconds": 5.0,
+   "peak_dbfs": -3.0,
+   "rms_dbfs": -16.92,
+   "a_weighted_dbfs": -17.71,
+   "machine": "the four motors' own ventilation (a fan on each armature shaft): broadband rush",
+   "layer": "MotorsAir",
+   "follows": "speed only, for loudness and colour",
+   "synthesised_at": {
+    "kmh": 80.0,
+    "motor_rev_s": 24.836,
+    "rush_centre_hz": 695.4
+   },
+   "pitch_law": "pitch = km/h / 80, held at 0.5 below 40 km/h",
+   "pitch_points": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     40.0,
+     0.5
+    ],
+    [
+     125.0,
+     1.562
+    ]
+   ],
+   "volume_law": "0.35 of the gear loops' level at 125 km/h, x (v/125)^2.5; not touched by load",
+   "trim": 0.1921,
+   "volume_points": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     20.0,
+     0.002
+    ],
+    [
+     40.0,
+     0.0111
+    ],
+    [
+     60.0,
+     0.0307
+    ],
+    [
+     80.0,
+     0.063
+    ],
+    [
+     100.0,
+     0.11
+    ],
+    [
+     125.0,
+     0.1921
+    ]
+   ]
+  }
+ ]
+}
