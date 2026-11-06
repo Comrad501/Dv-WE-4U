@@ -1,17 +1,11 @@
-// EU07 for Derail Valley - a back door for testing with nobody at the keyboard.
-//
-// It exists only when there is a folder called "debug" beside the mod's DLL. Then, twice a
-// second, it
-//
-//   - reads debug/command.txt, obeys each line, deletes the file, and appends what
-//     happened to debug/log.txt
-//   - writes debug/status.txt: the first EU07's speed, position, every port, the relays
+// debug hook for unattended tests
+// on only if a "debug" folder sits beside the DLL; twice a second:
+//   - debug/command.txt: run each line, delete file, results -> debug/log.txt
+//   - debug/status.txt: chosen EU07's speed, position, ports, relays
 //
 // Commands:
 //
-//   spawn [east north]         an EU07 on the track nearest the player, or nearest a point
-//                              that many metres east and north of him (so as not to land
-//                              against whatever he is standing in)
+//   spawn [livery] [east north] EU07 (or any livery) on nearest track; offset in m from player
 //   ws 1 | ws 0                fast breaker
 //   reset                      OPN and WJ1
 //   field N                    field lever
@@ -19,18 +13,20 @@
 //   handbrake X                0 off, 1 on
 //   port <id> <value>          set any port, e.g.  port throttle.EXT_IN 0.1
 //   fuse <id> 1 | 0            a fuse, e.g.  fuse fusebox.ELECTRICS_MAIN 1
-//   delete                     remove the EU07s this spawned
-//   gadget <item> [r u f]      a gadget made, mounted in the instrument cupboard and soldered
-//   shove <m/s>                the chosen one set rolling at that speed
-//   trip                       as if its SHP box had just passed a track magnet
-//   show <item> [up] [turned]  an item's shapes hung over its roof, for the camera
-//                              (those four: only on an EU07 this spawned)
-//   watch [seconds] [car id]   every physics step and frame, each car of the train: speed, travel, how far
-//                              the interior stands off the body, the moving/sleep flags -> debug/motion_trace.csv
-//                              (read-only: any train, the player's own included)
+//   delete                     remove EU07s this spawned
+//   gadget <item> [r u f [yaw]] mount + solder a gadget in the instrument cupboard (or at r u f)
+//   shove <m/s>                set the chosen one rolling
+//   trip                       SHP box as if over a track magnet
+//   show <item> [up] [turned]  item meshes over the roof, for the camera
+//                              (those four: spawned-by-hook only)
+//   watch [seconds] [car id]   per-step motion of a train's cars -> debug/motion_trace.csv
+//   tracks                     track centre lines, stations -> debug/tracks.json
+//   catalog                    every vehicle catalogue page -> debug/catalog_NN.png
+//   wreck | unwreck | derail   chosen one wrecked, restored, or derailed
+//   item <name>                item prefab's parts and fields -> debug/item_<name>.txt
+//   pair ..., mu ..., decals, choose <car id>   see their cases
 //
-// The controller wheel and reverser are ports like the rest: throttle.EXT_IN (0-1 over 44
-// positions) and reverser.CONTROL_EXT_IN.
+// controller wheel: port throttle.EXT_IN (0-1, 44 positions); reverser: reverser.CONTROL_EXT_IN
 
 using System;
 using System.Collections.Generic;
@@ -80,11 +76,8 @@ internal class eu07_debug: MonoBehaviour
         }
     }
 
-    // Which locomotive the status is of and the commands are for: the one the player is aboard,
-    // if it is one of ours; else the one he was last aboard; else the first. (It was always the
-    // first - and a second one, spawned to try a cold start, could not be looked at:
-    // "Now whats L-073's problem?", the author, 2026-10-12.)
-    private eu07_driver? _last_chosen, _named;       // _named: chosen by the "choose" command, which overrules where the player is
+    // target: "choose"d one, else boarded, else last boarded, else first
+    private eu07_driver? _last_chosen, _named;
     private eu07_driver? chosen()
     {
         if (_named != null && eu07_driver.all.Contains(_named))
@@ -98,9 +91,8 @@ internal class eu07_debug: MonoBehaviour
         return _last_chosen;
     }
 
-    // (An item is not whole until a frame after it is made - what it is to the inventory is found in its Start -
-    // and the game's own mounting asks for that. So: made, a frame waited, mounted.)
-    private System.Collections.IEnumerator mount(TrainCar car, GameObject prefab, string name, Vector3 at)
+    // item set up in its Start, needed for mounting: wait a frame
+    private System.Collections.IEnumerator mount(TrainCar car, GameObject prefab, string name, Vector3 at, float yaw = 0.0f)
     {
         GameObject made = Instantiate(prefab, car.transform.position + Vector3.up * 3.0f, Quaternion.identity);
         made.name = name;
@@ -119,9 +111,9 @@ internal class eu07_debug: MonoBehaviour
             {
                 Transform parent = car.Customization.GetParentingTransform();
                 Vector3 local = parent.InverseTransformPoint(car.transform.TransformPoint(at));
-                Quaternion turned = Quaternion.Inverse(parent.rotation) * car.transform.rotation * Quaternion.LookRotation(Vector3.back, Vector3.up);
+                Quaternion turned = Quaternion.Inverse(parent.rotation) * car.transform.rotation * Quaternion.LookRotation(Quaternion.Euler(0.0f, yaw, 0.0f) * Vector3.back, Vector3.up);
                 DV.Customization.Gadgets.GadgetBase mounted = DV.Customization.Gadgets.GadgetItem.Place(car.Customization, local, turned, item);
-                mounted.MakeSoldered();                         // (the game's own: it is this that joins the gadget to the vehicle's fuse)
+                mounted.MakeSoldered();                         // joins gadget to the vehicle's fuse
                 outcome = $"mounted {mounted.name} at {at} of {car.ID}, soldered {mounted.IsSoldered}; fed {mounted.PowerState}";
             }
         }
@@ -136,11 +128,118 @@ internal class eu07_debug: MonoBehaviour
     {
         switch (words[0])
         {
+            case "wreck":
+            case "unwreck":
+            case "derail":
+            {
+                eu07_driver? subject = chosen();
+                if (subject == null || subject.car == null)
+                    return "choose a WE-4U first";
+                if (words[0] == "wreck")
+                    eu07_wreck.wreck(subject.car, "by the debug hook");
+                else if (words[0] == "unwreck")
+                    TrainCarExplosion.RevertModelToUnexploded(subject.car);
+                else
+                    subject.car.Derail();
+                return $"{subject.car.ID}: derailed {subject.car.derailed}, wrecked {subject.car.isExploded}";
+            }
+            case "item":
+            {
+                // every part: components, public fields
+                if (words.Length < 2)
+                    return "item <prefab name>";
+                GameObject? stock = Resources.Load<GameObject>(words[1]);
+                if (stock == null)
+                    return "no such item: " + words[1];
+                var text = new System.Text.StringBuilder();
+                void dump(Transform part, int depth)
+                {
+                    text.Append(new string(' ', depth * 2)).Append(part.name).Append(part.gameObject.activeSelf ? "" : " (inactive)")
+                        .Append(string.Format(System.Globalization.CultureInfo.InvariantCulture, "  at {0:F4} {1:F4} {2:F4}", part.localPosition.x, part.localPosition.y, part.localPosition.z)).Append('\n');
+                    foreach (Component one in part.GetComponents<Component>())
+                    {
+                        if (one == null || one is Transform)
+                            continue;
+                        text.Append(new string(' ', depth * 2 + 2)).Append("[").Append(one.GetType().FullName).Append("]");
+                        foreach (System.Reflection.FieldInfo field in one.GetType().GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                        {
+                            object? value;
+                            try { value = field.GetValue(one); } catch (Exception) { continue; }
+                            if (value is UnityEngine.Object unity)
+                                value = unity != null ? unity.name : "null";
+                            else if (value is System.Collections.ICollection many && !(value is string))
+                                value = $"[{many.Count}]";
+                            text.Append(' ').Append(field.Name).Append('=').Append(value);
+                        }
+                        text.Append('\n');
+                    }
+                    foreach (Transform inside in part)
+                        dump(inside, depth + 1);
+                }
+                dump(stock.transform, 0);
+                // gadgetPrefab: not public
+                if (stock.GetComponent<DV.Customization.Gadgets.GadgetItem>() is DV.Customization.Gadgets.GadgetItem gadget_item
+                    && typeof(DV.Customization.Gadgets.GadgetItem).GetField("gadgetPrefab", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(gadget_item) is Component gadget_prefab
+                    && gadget_prefab != null)
+                {
+                    text.Append("\n--- its gadget prefab ---\n");
+                    dump(gadget_prefab.transform, 0);
+                }
+                File.WriteAllText(Path.Combine(folder, "item_" + words[1] + ".txt"), text.ToString());
+                return $"{words[1]} -> item_{words[1]}.txt";
+            }
+            case "catalog":
+            {
+                // copy of the catalogue's renderer draws the pages
+                var renders = Resources.FindObjectsOfTypeAll<DV.RenderTextureSystem.BookletRender.VehicleCatalogRender>();
+                var original = renders.FirstOrDefault(render => !render.gameObject.scene.IsValid()) ?? renders.FirstOrDefault();
+                if (original == null)
+                    return "no vehicle catalogue loaded";
+                var drawing = Instantiate(original);
+                drawing.TexturesGenerated += (textures, _) =>
+                {
+                    for (int i = 0; i < textures.Length; i++)
+                        File.WriteAllBytes(Path.Combine(folder, $"catalog_{i:00}.png"), DV.RenderTextureSystem.BookletRender.StaticTextureRenderBase.EncodeGenericTextureToPNG(textures[i]));
+                    File.AppendAllText(Path.Combine(folder, "log.txt"), $"{DateTime.Now:HH:mm:ss} catalog -> {textures.Length} pages written\n");
+                };
+                drawing.GenerateStaticPagesTextures();
+                return $"{renders.Length} catalogue renderer(s); drawing the cover and {drawing.vehiclePages.Length} vehicle pages";
+            }
+            case "tracks":
+            {
+                // world's current (floating-origin) frame
+                var text = new System.Text.StringBuilder();
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                text.Append("{\"tracks\":[");
+                int count = 0;
+                foreach (RailTrack track in FindObjectsOfType<RailTrack>())
+                {
+                    DV.PointSet.EquiPointSet? points = track.GetKinkedPointSet();
+                    if (points == null)
+                        continue;
+                    text.Append(count++ == 0 ? "" : ",").Append("{\"name\":\"").Append(track.name.Replace("\"", "'")).Append("\",\"p\":[");
+                    for (int i = 0; i < points.points.Length; i++)
+                    {
+                        var at = points.points[i].position;
+                        text.Append(string.Format(inv, "{0}[{1:F2},{2:F3},{3:F2}]", i == 0 ? "" : ",", at.x, at.y, at.z));
+                    }
+                    text.Append("]}");
+                }
+                text.Append("],\"stations\":[");
+                int stations = 0;
+                foreach (StationController station in StationController.allStations ?? [])
+                {
+                    Vector3 at = station.transform.position;
+                    text.Append(stations++ == 0 ? "" : ",").Append(string.Format(inv, "{{\"id\":\"{0}\",\"name\":\"{1}\",\"at\":[{2:F2},{3:F2},{4:F2}]}}",
+                        station.stationInfo.YardID, station.stationInfo.Name, at.x, at.y, at.z));
+                }
+                text.Append("]}");
+                File.WriteAllText(Path.Combine(folder, "tracks.json"), text.ToString());
+                return $"{count} tracks, {stations} stations -> tracks.json";
+            }
             case "watch":
             {
-                // watch [seconds] [car id]: every physics step and frame, each car of that car's train - its speed,
-                // how far it has gone, how far its interior stands off the body, the game's moving/sleep flags - into
-                // debug/motion_trace.csv (eu07_motion_watch.cs). Read-only: on any train, the player's own included.
+                // any train, player's own too (eu07_motion_watch.cs)
                 float seconds = words.Length > 1 && float.TryParse(words[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float asked) ? Mathf.Clamp(asked, 1.0f, 600.0f) : 60.0f;
                 TrainCar? around = words.Length > 2
                     ? CarSpawner.Instance.AllCars.FirstOrDefault(car => car != null && car.ID == words[2])
@@ -151,7 +250,7 @@ internal class eu07_debug: MonoBehaviour
             }
             case "spawn":
             {
-                // spawn [livery id] [east north]: one of ours, or - to try ours with one of the game's - any livery ("spawn ?" lists the locomotives')
+                // "spawn ?": liveries with an MU cable
                 string wanted_livery = eu07_mod.livery_prefix;
                 int offset_at = 1;
                 if (words.Length > 1 && !float.TryParse(words[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
@@ -193,13 +292,12 @@ internal class eu07_debug: MonoBehaviour
             }
             case "pair":
             {
-                // OURS WITH ONE OF THE GAME'S ("Could you dry test the stock to ours test both ways (slave and
-                // master?)", the author, 2026-10-12) - on locomotives THIS HOOK SPAWNED, and on no others:
-                // pair                              : every spawned one - how it is joined, and where each shared control stands
-                // pair cable <a> <b> [reversed]     : a's rear cable into b's front (reversed: into b's rear - back to back)
-                // pair radio <leader> <other> ...   : one radio channel, the first transmitting
-                // pair free                         : every cable out, everybody off the radio
-                // pair set <car> <control> <0-1>    : throttle reverser brake indbrake dynbrake sander lights_front lights_rear, as that car's own handle would
+                // MU tests with stock locos; spawned-by-hook only
+                // pair                           : spawned ones: links, shared control values
+                // pair cable <a> <b> [reversed]  : a's rear cable to b's front (reversed: b's rear)
+                // pair radio <leader> <other> ...: one radio channel, first transmits
+                // pair free                      : all cables out, all off radio
+                // pair set <car> <control> <0-1> : throttle reverser brake indbrake dynbrake sander lights_front lights_rear
                 TrainCar? spawned(string id) => _spawned.Find(car => car != null && car.ID == id && car.muModule != null);
                 DV.Simulation.Controllers.OverridableBaseControl? handle(TrainCar car, string name)
                 {
@@ -291,10 +389,10 @@ internal class eu07_debug: MonoBehaviour
             }
             case "mu":
             {
-                // mu                         : how the chosen locomotive is joined to others
-                // mu link <car id>           : by radio, the chosen one leading (as the game's wireless controller would: no coupling needed)
-                // mu unlink                  : every one of ours off the radio
-                // mu set <control> <0-1>     : throttle, reverser, brake, indbrake, sander - as the desk's handle would set it
+                // mu                     : chosen loco's links
+                // mu link <car id>       : radio, chosen leads (no coupling)
+                // mu unlink              : all ours off radio
+                // mu set <control> <0-1> : throttle, reverser, brake, indbrake, sander
                 eu07_driver? own = chosen();
                 if (own == null || own.car == null)
                     return "no EU07";
@@ -342,9 +440,7 @@ internal class eu07_debug: MonoBehaviour
             }
             case "shove":
             {
-                // shove <m/s>: the CHOSEN locomotive set rolling at that speed, forward of itself (negative: backward),
-                // by the game's own way of giving a vehicle a speed - for trying what only happens on the move with
-                // nobody to drive. On locomotives THIS HOOK SPAWNED, and on no others.
+                // negative = backward; spawned-by-hook only
                 eu07_driver? rolled = chosen();
                 if (rolled == null || rolled.car == null || !_spawned.Contains(rolled.car))
                     return "only on a locomotive this hook spawned (choose it first)";
@@ -357,12 +453,30 @@ internal class eu07_debug: MonoBehaviour
                 set.Invoke(rolled.car, [speed]);
                 return $"shoved {rolled.car.ID} at {speed:F1} m/s";
             }
+            case "decals":
+            {
+                // decals [noshadow]: decal materials, render state; noshadow = shadows off
+                eu07_driver? holder = chosen();
+                if (holder == null || holder.car == null)
+                    return "choose a WE-4U first";
+                List<string> seen = new();
+                foreach (Renderer drawn in holder.car.GetComponentsInChildren<Renderer>(true))
+                {
+                    Material? first = drawn.sharedMaterials.FirstOrDefault(material => material != null && material.name.StartsWith("EU07_decals"));
+                    if (first == null)
+                        continue;
+                    if (words.Length > 1 && words[1] == "noshadow")
+                        drawn.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    seen.Add($"{drawn.name}: {first.name} {first.shader.name} supported {first.shader.isSupported} queue {first.renderQueue} " +
+                             $"keywords [{string.Join(" ", first.shaderKeywords)}] cutoff {first.GetFloat("_Cutoff"):F2} shadows {drawn.shadowCastingMode} " +
+                             $"tag {first.GetTag("RenderType", false)}");
+                }
+                return seen.Count == 0 ? "no decals" : string.Join(" | ", seen);
+            }
             case "show":
             {
-                // show <item prefab name> [up] [turned degrees]: what an item LOOKS like - its shapes alone, nothing
-                // that works - hung `up` metres over the middle of the CHOSEN locomotive, its face to the rear, for a
-                // camera to look at. (A gadget mounted on a locomotive nobody is near is not drawn at all.)
-                // On locomotives THIS HOOK SPAWNED, and on no others.
+                // item meshes only, colliders off, `up` m over the loco; spawned-by-hook only
+                // (a mounted gadget is not drawn with nobody near)
                 eu07_driver? under = chosen();
                 if (under == null || under.car == null || !_spawned.Contains(under.car))
                     return "only on a locomotive this hook spawned (choose it first)";
@@ -392,8 +506,7 @@ internal class eu07_debug: MonoBehaviour
             }
             case "trip":
             {
-                // trip: as if the CHOSEN locomotive's SHP box had just passed over a track magnet (it must be fed, and
-                // the locomotive rolling, as for a real one). On locomotives THIS HOOK SPAWNED, and on no others.
+                // needs box fed + loco rolling; spawned-by-hook only
                 eu07_driver? tripped = chosen();
                 if (tripped == null || tripped.car == null || !_spawned.Contains(tripped.car) || tripped.car.Customization == null)
                     return "only on a locomotive this hook spawned (choose it first)";
@@ -408,32 +521,29 @@ internal class eu07_debug: MonoBehaviour
             }
             case "gadget":
             {
-                // gadget <item prefab name> [right up forward]: one of the game's gadgets - or a mod's - made, mounted
-                // on the instrument cupboard's back board of the CHOSEN locomotive and soldered, as a player would
-                // with the item, the drill and the iron; for trying what a gadget does aboard with nobody there.
-                // On locomotives THIS HOOK SPAWNED, and on no others.
+                // mount + solder as a player would; spawned-by-hook only
                 eu07_driver? on = chosen();
                 if (on == null || on.car == null || !_spawned.Contains(on.car))
                     return "only on a locomotive this hook spawned (choose it first)";
                 if (words.Length < 2)
-                    return "gadget <item prefab name> [right up forward]";
+                    return "gadget <item prefab name> [right up forward [yaw]]";
                 GameObject? prefab = Resources.Load(words[1]) as GameObject;
                 if (prefab == null)
                     return "the game has no item called " + words[1];
                 if (on.car.Customization == null)
                     return "the locomotive takes no gadgets";
-                Vector3 at = new(0.18f, 2.03f, 6.62f);          // the right-hand cupboard's back board, about its middle
-                if (words.Length == 5 && float.TryParse(words[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float right)
+                Vector3 at = new(0.18f, 2.03f, 6.62f);          // right cupboard back board, middle
+                float yaw = words.Length == 6 && float.TryParse(words[5], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float turn) ? turn : 0.0f;
+                if (words.Length >= 5 && float.TryParse(words[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float right)
                                       && float.TryParse(words[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float up)
                                       && float.TryParse(words[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float forward))
                     at = new Vector3(right, up, forward);
-                StartCoroutine(mount(on.car, prefab, words[1], at));
+                StartCoroutine(mount(on.car, prefab, words[1], at, yaw));
                 return "mounting " + words[1] + " (the outcome follows in this log)";
             }
             case "choose":
             {
-                // choose <car id>: the status and the commands are for that one, wherever the player is;
-                // choose alone: back to the one he is aboard
+                // choose <car id>: target that one; alone: follow the player
                 eu07_driver? named = words.Length == 2 ? eu07_driver.all.Find(driver => driver != null && driver.car != null && driver.car.ID == words[1]) : null;
                 _named = named;
                 if (named == null)

@@ -1,7 +1,5 @@
-// EU07 for Derail Valley - the mod's entry, and the car spawner hook.
-//
-// Custom Car Loader builds the vehicle from the asset bundle; this gives it its electrics.
-// Every car whose livery id begins with "EU07" gets an eu07_driver component.
+// EU07 mod entry + car spawner hook
+// CCL builds the vehicle; liveries starting "EU07" get an eu07_driver
 
 using System;
 using System.Diagnostics;
@@ -15,7 +13,7 @@ using static UnityModManagerNet.UnityModManager;
 
 namespace electric_sim;
 
-// Knsgf's sources log through a class of this name.
+// Knsgf's sources log via a class of this name
 public static class Main
 {
     internal static ModEntry.ModLogger? logger;
@@ -29,9 +27,8 @@ public static class Main
     public static void release_log(string message) => logger?.Log(message);
 }
 
-// THE MOD'S OWN KEYS ("can we give it a custom keybing", the author, 2026-10-13, of the vigilance button). The game's
-// keys are a fixed list and none of them is a vigilance button, so this one is the mod's: set on its page in the
-// mod manager (Ctrl+F10), kept in its Settings.xml. It does what the yellow button on the desk does.
+// mod key bindings (UMM page, Ctrl+F10; Settings.xml)
+// vigilance key = yellow desk button; the game has no such binding
 public class eu07_settings : ModSettings, IDrawable
 {
     [Draw("Vigilance button (answers the vigilance device)")]
@@ -71,11 +68,8 @@ public static class eu07_mod
             code_injector = new Harmony(mod.Info.Id);
             code_injector.PatchAll(Assembly.GetExecutingAssembly());
             Main.release_log("EU07 electrics loaded");
-            // WHAT THE PING IS ("the singular ping at every launch is a CCL error reminder. any idea what it might
-            // be?", the author, 2026-10-12). It is the GAME's own: its ErrorSoundLogHandler, which Custom Car
-            // Loader switches on, sounds once for every log entry of the kind Error or Exception, whoever
-            // wrote it - and the game's log file does not say which entries are of that kind. So, with the
-            // debug folder there, each such entry is set down in debug/errors.txt with the time.
+            // ErrorSoundLogHandler (on via CCL) pings on every Error/Exception
+            // debug folder: log them to debug/errors.txt
             if (unit_A.eu07_debug.wanted)
                 UnityEngine.Application.logMessageReceived += heard;
         }
@@ -105,16 +99,8 @@ public static class eu07_mod
     }
 }
 
-// PINGS AT EVERY LOAD, a locomotive of ours ("Heard a ping again", the author, 2026-10-12; debug/errors.txt:
-// "Unexpected state: Missing save data for 'electricityMeter' component, skipping."). The game calls it an
-// error when a save has nothing for a part of the simulation that says it keeps something. Two ways that
-// comes about, neither a fault of the save:
-//   - the meter is the catenary mod's, had from the railcar the vehicle was built on: it says it has save
-//     data and writes none while nobody is billed for the current - a free-roam game;
-//   - a control this vehicle has been GIVEN since the save was made (the leader's lamp selector, the same
-//     evening: four more pings on the next load).
-// So, for a vehicle of ours only: where a save has nothing for such a part, it is handed the part's own
-// state as it stands - what it would have had anyway - and for the meter a nought, before the game looks.
+// missing save data on a sim component: game logs an error (= ping)
+// our cars only: fill from current state (catenary electricityMeter: 0; new controls)
 [HarmonyPatch(typeof(LocoSim.Implementations.SimulationFlow), nameof(LocoSim.Implementations.SimulationFlow.SetSaveStateData))]
 internal static class nothing_saved_for_it
 {
@@ -149,14 +135,8 @@ internal static class nothing_saved_for_it
     }
 }
 
-// THE GAME'S VIGILANCE BOX STOPS A TRAIN BY ITS HANDLES ("vigilancy now calls for another valve. a Czuwak brake cutoff
-// valve. but how do we stop the game from pulling the brakes?", the author, 2026-10-13). Read in the game
-// (GadgetATS.Update): while it is stopping a train it lets go of the driver's hand and, five times a second, moves
-// the throttle to nothing and the train brake's handle to full. A real one touches no handle: it opens a valve of
-// its own that empties the brake pipe - a valve with a cock before it, which is what the author asks for.
-// So, for a box on a locomotive of OURS only, its Update is done here instead: the same count, the same warning,
-// and nothing more. The stop is the locomotive's own (eu07_driver.watch_vigilance): the pipe emptied through that
-// valve unless its cock is shut. On anything else the box is the game's, untouched.
+// stock vigilance box forces throttle 0 + full brake; ours vents the pipe instead
+// our locos only: timer only; stop in eu07_driver.watch_vigilance
 [HarmonyPatch(typeof(DV.Customization.Gadgets.Implementations.GadgetATS), "Update")]
 internal static class vigilance_box_on_ours
 {

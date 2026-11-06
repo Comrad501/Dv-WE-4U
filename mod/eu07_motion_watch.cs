@@ -1,21 +1,6 @@
-// EU07 for Derail Valley - a watcher for cars that rock back and forth (debug hook: "watch").
-//
-// "locos and cars for some reason oscillate back and fourth, detaching the body from the functioning model.
-// make a watcher, which polls velocity and youll see the weird oscillation" (the author, 2026-10-14, with a
-// picture of the cab's cocks standing off their pipes).
-//
-// What the game does that this looks at (read in it): a car's INTERIOR - the cab, and with it the external
-// interactables, our desk, cupboards and cocks - is a separate object, not a child of the car. A component on
-// the car (TrainCarInteriorPhysics) puts it where the car is in every LateUpdate, but ONLY while the game counts
-// the car as moving. Whether it is moving is decided by an ECS system (TrainCarPositionMonitorSystem): a car that
-// has stayed within 2 mm (1 cm with no interior loaded) of where it last moved, for a second, is STATIONARY and
-// eligible for sleep - and once it is both, the system stops looking at it until something wakes it. A body that
-// goes on creeping or rocking after that leaves its interior where it was.
-//
-// So this records, every physics step and every frame, for each car of the train: the speed along the car, how
-// far it has gone, how far its interior stands from where the body is, the game's two flags, and its brakes
-// (pipe and cylinder pressure, handbrake): a train whose brakes keep changing never stands still enough to freeze. Read-only: it
-// moves nothing, presses nothing, and may watch the player's own train. Written to debug/motion_trace.csv.
+// debug "watch": motion recorder for rocking cars -> debug/motion_trace.csv (read-only)
+// interior follows the car only while moving (TrainCarInteriorPhysics, LateUpdate)
+// stationary + sleep: within 2 mm (1 cm, no interior) for 1 s; then unchecked, interior left behind
 
 using System;
 using System.Collections;
@@ -111,7 +96,7 @@ internal class eu07_motion_watch : MonoBehaviour
         sample("physics");
     }
 
-    // after the game's own LateUpdate has put the interior where it puts it: what is drawn
+    // after the game's LateUpdate: what is drawn
     private void LateUpdate() => sample("frame");
 
     private void OnDestroy() => flush();

@@ -1,21 +1,6 @@
-// EU07 for Derail Valley - the locomotive's own sounds, played by the mod.
-//
-// A ROUGH FIRST RUN (the author, 2026-10-10: "place that into the game, so i can have a rough
-// audio run"). The sounds are ours - synthesised by audio/synth_*.py - and lie as WAV files in
-// the mod's folder, audio/, with audio/table.txt saying what each follows
-// (tools/audio_table.py). Nothing goes through the vehicle's audio prefab: this class makes
-// its own AudioSources on the locomotive and sets their pitch and loudness every frame from
-// the simulation, and plays the one-shots when it sees a contactor, the breaker or a relay
-// change. That is the quickest way to hear them; whether they later move into a Custom Car
-// Loader audio prefab is open (docs/research/research_audio.md).
-//
-// LOUD, and loudest at speed (the author, the same day: "the whole jist of the 07's are that
-// they are loud"). Levels are set by MEASURING, not by ear nobody has here: heard_dB is what
-// reaches the listener, the debug command "audio 0" silences ours for comparison, and
-// debug/audio_trace.csv records ten lines a second (tools/audio_trace.py reads it).
-//
-// What it does not do yet: no pantograph "reaches the wire", no Hasler tick (a quiet running
-// loop stands in), no low-pass with distance (far off only the gear tone should be left).
+// EU07 sounds: own AudioSources, not a CCL audio prefab
+// clips: audio/*.wav (audio/synth_*.py); table.txt = what each follows
+// loops: pitch/volume per frame from the sim; one-shots on contactor/breaker/relay changes
 
 using System;
 using System.Collections.Generic;
@@ -38,7 +23,7 @@ internal class eu07_audio
     }
 
     private static readonly Dictionary<string, AudioClip> _clips = [];
-    // Where on the locomotive (x right, y up from the rail, z toward cab A).
+    // spot on the loco: x right, y up from rail, z toward cab A
     private static readonly Dictionary<string, Vector3> _spots = new()
     {
         ["motors"]      = new Vector3( 0.00f, 0.7f,  0.00f),
@@ -69,41 +54,39 @@ internal class eu07_audio
     private string? _all;
     private float _mixer_search = 0.0f;
 
-    // what was, to see what changed
+    // last frame's state, for change detection
     private int   _position = 0, _field = 0;
     private bool  _breaker = false, _relays = false, _line = false, _battery = false;
-    // the driver's side of it: the two horns (0-1 each) and the sand's flow (0-1), set before update()
+    // driver inputs, 0-1, set before update()
     public float horn_low = 0.0f, horn_high = 0.0f, sand = 0.0f;
-    public bool  vigilance_buzzer = false;       // the vigilance device has asked for longer than its lamp goes alone (eu07_driver, watch_vigilance)
-    public bool  small_compressor = false;       // the pantographs' small compressor is running
+    public bool  vigilance_buzzer = false;       // set by eu07_driver: vigilance lamp unanswered
+    public bool  small_compressor = false;       // panto small compressor running
     private float _small = 0.0f;
-    public readonly bool[] panto_wanted = new bool[2];            // each pantograph's switch
+    public readonly bool[] panto_wanted = new bool[2];            // panto switches
     private readonly bool[] _panto_wanted = new bool[2];
     private float _horn_low = 0.0f, _horn_high = 0.0f;
-    // each pantograph: how far up it was a frame ago, and which way it is going
+    // per panto: last height, direction
     private readonly float[] _raised = new float[2];
     private readonly int[]   _going = new int[2];
     private readonly bool[] _compressing = new bool[2];
     private float _converter = 0.0f, _fan = 0.0f;
-    // each pantograph: whether its pan was on the wire a frame ago, and how long since it was down
+    // per panto: on wire last frame, time since down
     private readonly bool[]  _on_wire    = new bool[2];
     private readonly float[] _since_down = { 1000.0f, 1000.0f };
     private readonly float[] _compressor = new float[2];
     private bool  _first = true;
     private int   _starts = 0;
-    private float _relay_peak = 0.0f;         // the highest the relays saw since the trace's last line
+    private float _relay_peak = 0.0f;         // relay peak since last trace line
 
     public int loops => _loops.Count;
     public int events => _shots.Count;
     public int playing => _loops.Count(item => item.source.isPlaying);
     public string group => _mixer == null ? "not_found" : _all ?? "own";
 
-    // For measuring instead of guessing: what reaches the player's ears, everything mixed, in
-    // dB under full scale (averaged over a second or so); and a switch that silences all of
-    // OURS, so that the same run can be read with and without.
+    // heard level, all mixed, dBFS (~1 s average); muted = ours only
     private readonly float[] _heard = new float[1024];
     private float _mean_square = 0.0f, _peak = 0.0f;
-    // the highest single value lately: at 0 dB the output is cutting tops off
+    // recent peak; 0 dB = clipping
     public float peak_dB => 20.0f * Mathf.Log10(Mathf.Max(_peak, 1.0e-5f));
     public float heard_dB => 10.0f * Mathf.Log10(Mathf.Max(_mean_square, 1.0e-10f));
     public bool muted
@@ -117,19 +100,13 @@ internal class eu07_audio
         }
     }
     private bool _muted = false;
-    // WHAT IS HEARD IN A CAB IS HEARD IN THAT CAB ("i can hear the hassler in another loco's cab", the author,
-    // 2026-10-13, of two of these coupled). Every source is made to carry the length of the locomotive with no
-    // falling off, so the recorder's tick, the buzzers and the desk's clicks of the NEXT locomotive, 16 m away, were
-    // as loud as one's own. The sounds placed in the cab are small sounds behind doors: they are for whoever is
-    // aboard THIS locomotive, and silent for everybody else.
+    // cab sounds: muted unless player aboard
+    // (no falloff along the loco, so heard in coupled cabs too)
     private readonly List<AudioSource> _cab_sources = [];
     private bool _aboard = false;
     private const string in_the_cab = "cab";
 
-    // "The audio still just randomly cuts out for 1 or 2 seconds. but only ours" (the author,
-    // 2026-10-10). So a record, ten lines a second while the debug folder exists: what was
-    // asked of the loops, how many of them the sound card was NOT playing (culled: the game
-    // has 32 voices), and what reached the ears. tools/audio_trace.py reads it.
+    // debug trace, 10 lines/s: asked volumes, culled voices (32 real), heard level
     private readonly string? _trace;
     private float _trace_wait = 0.0f, _clock = 0.0f;
     private readonly System.Text.StringBuilder _lines = new();
@@ -162,13 +139,13 @@ internal class eu07_audio
                 source.volume = 0.0f;
                 if (words[2] == in_the_cab)
                     _cab_sources.Add(source);
-                // no two machines turn quite alike: a few parts in a thousand apart, they beat like the real four
+                // slight random detune: identical machines beat
                 loop made = new() { source = source, value = words[3], master = words[4], gain = number(words[5]),
                                     detune = 1.0f + ((float) _dice.NextDouble() - 0.5f) * 0.012f };
                 if (words[2].StartsWith("motor") || words[2].StartsWith("bogie") || words[2].StartsWith("fan") || words[2].StartsWith("converter"))
-                    source.minDistance = 30.0f;          // these carry: a tenth of full strength is still heard 300 m off
+                    source.minDistance = 30.0f;          // ~10% still heard at 300 m
                 if (words[2] == "horn")
-                    source.minDistance = 90.0f;          // and this is made to: a tenth of it a kilometre off
+                    source.minDistance = 90.0f;          // ~10% at 1 km
                 points(words[6], out made.pitch_x, out made.pitch_y);
                 points(words[7], out made.volume_x, out made.volume_y);
                 _loops.Add(made);
@@ -226,20 +203,17 @@ internal class eu07_audio
         source.playOnAwake = false;
         source.spatialBlend = 1.0f;
         source.dopplerLevel = 0.0f;
-        source.minDistance = 14.0f;       // the whole locomotive is "near": no falling off between its ends
+        source.minDistance = 14.0f;       // no falloff within the loco's length
         source.maxDistance = 3000.0f;
         source.rolloffMode = AudioRolloffMode.Logarithmic;
-        // The sound card plays only so many voices at once and the game fills most of them; a
-        // source of ordinary rank (128) is then dropped and picked up again as it pleases -
-        // "our audio keeps on cutting out" (the author, 2026-10-10). The locomotive's own
-        // machines go before nearly everything.
+        // above default 128: game fills most voices, ours got culled
         source.priority = 24;
         _places[source] = place;
         source.outputAudioMixerGroup = channel(place);
         return source;
     }
 
-    // 16-bit mono PCM, as audio/synth_*.py write it.
+    // 16-bit mono PCM, from audio/synth_*.py
     private static AudioClip? clip(string folder, string name)
     {
         if (_clips.TryGetValue(name, out AudioClip known))
@@ -271,13 +245,8 @@ internal class eu07_audio
         float[] samples = new float[data_bytes / 2];
         for (int index = 0; index < samples.Length; ++index)
             samples[index] = BitConverter.ToInt16(bytes, data_at + index * 2) / 32768.0f;
-        // The motor, fan and converter loops were made with a great deal of headroom (level 13 to
-        // 17 dB under their peaks) and were hardly heard in the game. Pressed hard against a
-        // soft ceiling they were loud - and "everything seems like its getting bit crushed"
-        // (the author, 2026-10-10): the ceiling itself, and above all the sum of them riding at
-        // full scale, where the output simply cuts the tops off. So: each brought up CLEAN
-        // until its own peak is at full scale, the motors and fans then leaned on only gently
-        // (their rare tops rounded, about 2 dB gained), the converter not at all.
+        // normalise to peak; gentle soft-clip on motors/fans (~2 dB)
+        // harder drive distorts when loops sum at full scale
         if (name.StartsWith("motor_") || name.StartsWith("fan_") || name == "converter_run")
         {
             float top = 1.0e-6f;
@@ -302,7 +271,7 @@ internal class eu07_audio
         if (!_shots.TryGetValue(what, out (string place, float gain, AudioClip[] clips) shot))
             return;
         string place = where ?? shot.place;
-        // (a source has one pitch for everything it is playing: what is to sound higher or lower has a source of its own)
+        // one pitch per source: own source per pitch
         string from = pitch == 1.0f ? place : place + "@" + pitch.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
         if (!_shot_sources.TryGetValue(from, out AudioSource source))
         {
@@ -318,18 +287,11 @@ internal class eu07_audio
         source.PlayOneShot(shot.clips[_dice.Next(shot.clips.Length)], Mathf.Clamp01(shot.gain * loudness));
     }
 
-    // One of the table's sounds, asked for by the driver's side (eu07_driver): at its own place, or at another -
-    // the vigilance device's relay is the switchgear's relay's click, heard in the cab where that device is.
+    // table sound for eu07_driver, at its place or another
     public void sound(string what, float loudness = 1.0f, string? where = null, float pitch = 1.0f) => play(what, loudness, where, pitch);
 
-    // The game's mixer, so that its volume slider, tunnels and the cab act on these sounds as
-    // on the game's own - and WHICH of its channels matters. Measured in cab A with the meter
-    // below (2026-10-10, one loop at full strength): through "Engine" -18 dB, the same as
-    // standing outside; through "Compressor" -20; through "Wheels" or "Outdoors" -25 to -26,
-    // which is where everything of ours went at first and why the machines were faint from
-    // the driver's seat. So: what makes an EU07 an EU07 - gears, motors, resistor fans, the
-    // contactors' clatter - goes through Engine and fills the cab; the converter stays behind
-    // the wall ("the converter can be abit on the less side", the author).
+    // game mixer: volume slider, tunnels, cab damping apply
+    // cab levels: Engine -18 dB, Compressor -20, Wheels/Outdoors -25; converter kept quieter
     private static readonly Dictionary<string, string> _channels = new()
     {
         ["motors"] = "Engine", ["bogie_a"] = "Engine", ["bogie_b"] = "Engine", ["fans"] = "Engine", ["roof"] = "Engine", ["switchgear"] = "Engine", ["breaker"] = "Engine",
@@ -337,7 +299,7 @@ internal class eu07_audio
         ["cab"] = "Cab", ["horn"] = "Horn",
     };
 
-    // Finds the mixer through the car's own sounds, silences the borrowed railcar's machines.
+    // find mixer via the car's sources; mute base car's machine sounds
     private void borrow_mixer(TrainCar car)
     {
         IEnumerable<AudioSource> theirs = car.GetComponentsInChildren<AudioSource>(true);
@@ -356,10 +318,10 @@ internal class eu07_audio
             return;
         _groups = _mixer.FindMatchingGroups(string.Empty);
         use_group(null);
-        Main.release_log("EU07 audio: plays through the game's mixer " + _mixer.name + " (" + string.Join(", ", _groups.Select(one => one.name)) + ")");
+        Main.log("EU07 audio: plays through the game's mixer " + _mixer.name + " (" + string.Join(", ", _groups.Select(one => one.name)) + ")");
     }
 
-    // Every source to the channel of its place - or all of them to one, for trying.
+    // each source to its place's channel, or all to one (testing)
     private void use_group(string? all)
     {
         _all = all;
@@ -373,7 +335,7 @@ internal class eu07_audio
         return _groups.FirstOrDefault(one => one.name == wanted) ?? (_all == null ? _groups.FirstOrDefault(one => one.name == "Master") : null);
     }
 
-    // For trying the game's channels by name ("none": past the mixer; "own": each to its own again).
+    // test channels by name; "none" = bypass mixer, "own" = per place
     public string try_group(string name)
     {
         if (name != "none" && name != "own" && !_groups.Any(one => one.name == name))
@@ -382,7 +344,7 @@ internal class eu07_audio
         return "group " + group;
     }
 
-    // on_wire: for each pantograph, whether its pan touches the wire; raised: how far up it is, 0 to 1.
+    // on_wire: pan touches wire; raised: 0-1, per panto
     public void update(eu07_sim.power_circuit power, TrainCar car, float wire_volts, float delta, bool[] on_wire, float[] raised)
     {
         if (_root == null || _loops.Count == 0)
@@ -407,16 +369,16 @@ internal class eu07_audio
         }
         _mean_square += (squares / _heard.Length - _mean_square) * Mathf.Min(1.0f, delta / 1.0f);
 
-        // ---- what the loops follow ---------------------------------------------------------
+        // ---- loop inputs ----
         float kmh  = Mathf.Abs(car.GetForwardSpeed()) * 3.6f;
         float load = Mathf.Clamp01(Mathf.Max(power.ammeter_12, power.ammeter_34) / eu07_sim.power_circuit.overcurrent_normal);
-        // the fans have inertia the simulation does not give them: up in a second or so, down slowly
+        // fan inertia: ~1 s up, slow down
         _fan += (power.fan_speed - _fan) * Mathf.Min(1.0f, delta / (power.fan_speed > _fan ? 1.2f : 4.0f));
         for (int index = 0; index < 2; ++index)
             _compressor[index] = Mathf.MoveTowards(_compressor[index], power.compressor_running[index] ? 1.0f : 0.0f,
                 delta / (power.compressor_running[index] ? 0.5f : 1.0f));
         _small = Mathf.MoveTowards(_small, small_compressor ? 1.0f : 0.0f, delta / (small_compressor ? 0.4f : 0.8f));
-        // a horn speaks in a twentieth of a second and dies away in a fifth
+        // horn: 0.05 s attack, 0.2 s release
         _horn_low  = Mathf.MoveTowards(_horn_low , horn_low , delta / (horn_low  > _horn_low  ? 0.05f : 0.20f));
         _horn_high = Mathf.MoveTowards(_horn_high, horn_high, delta / (horn_high > _horn_high ? 0.05f : 0.20f));
         float asked_all = 0.0f, asked_motors = 0.0f, asked_fans = 0.0f;
@@ -438,7 +400,7 @@ internal class eu07_audio
                 _             => 0.0f,
             };
             float master = item.master switch { "load" => load, "gear" => 0.35f + 0.65f * Mathf.Clamp01(load * 4.0f), _ => 1.0f };
-            // a standing locomotive with no current makes no motor sound, whatever the bank says at 0 km/h
+            // standing, no current: no motor sound
             if (item.value == "kmh" && kmh < 0.3f && load < 0.01f)
                 master = 0.0f;
             float volume = Mathf.Clamp01(read(item.volume_x, item.volume_y, x) * master * item.gain);
@@ -475,7 +437,7 @@ internal class eu07_audio
             }
         }
 
-        // ---- what happened since the last frame ---------------------------------------------
+        // ---- events since last frame ----
         int position = power.contactors.position, field = power.contactors.field;
         bool breaker = power.fast_breaker_closed, line = power.line_contactors_closed;
         bool relays = power.overcurrent_tripped || power.earth_fault_tripped || power.converter_tripped
@@ -484,12 +446,12 @@ internal class eu07_audio
         {
             if (breaker != _breaker)
                 play(breaker ? "breaker_close" : "breaker_trip");
-            if (power.battery_contactor != _battery)                    // the last-mile battery's contactor: one heavy contactor in, out
+            if (power.battery_contactor != _battery)                    // battery contactor in/out
                 play(power.battery_contactor ? "contactor_close_heavy" : "contactor_open_double");
             if (relays != _relays)
                 play("relay_click");
             if (_line && !line && _position >= 4)
-                play("line_dropout");                                   // everything falls out at once
+                play("line_dropout");                                   // all drop at once
             else if (position > _position)
             {
                 for (int step = _position + 1; step <= position; ++step)
@@ -515,52 +477,42 @@ internal class eu07_audio
                 else if (!running && _compressing[index])
                 {
                     play("compressor_stop", index == 0 ? 1.0f : 0.7f);
-                    // stopped with its switch still on and no relay out: the pressure switch did it
+                    // stopped with switch on, no trip: pressure switch
                     if (index == 0 && power.compressor_switch[0] && !power.compressor_tripped && power.converter_charging)
                         play("compressor_unload");
                 }
             }
-            // The pan MEETING the wire, not the wire coming alive: it used to go by the volts,
-            // and so sounded at the end of every neutral section ("it also fires on voltage
-            // gain", the author, 2026-10-11). Now by the pantograph itself, and only for a pan
-            // that has come UP from its stops - not for a wire that comes back over a raised
-            // one after a gap.
+            // contact = pan meets wire after rising, not voltage return
+            // (voltage would fire after every neutral section)
             for (int pan = 0; pan < _on_wire.Length; ++pan)
             {
                 if (on_wire[pan] && !_on_wire[pan] && _since_down[pan] < 30.0f)
                     play("panto_contact");
             }
         }
-        // The pantographs' valves and their landing ("audio sure", the author, 2026-10-11, of
-        // three sounds made long ago and never played). The valve is the SWITCH's: it picks up
-        // as the switch goes on and drops as it goes off. They went by the pan's height at
-        // first, and the pan's height follows the wire: "im getting random panto drop or pant
-        // valve audio" (the same, an hour later). The landing is the pan coming to its stops
-        // after it has been well up - once, not at every flutter near the bottom.
+        // valve follows the switch, not pan height (which follows the wire)
+        // landing: once, at the stops after being well up
         for (int pan = 0; pan < _raised.Length && pan < raised.Length; ++pan)
         {
             if (!_first)
             {
-                // each of these is written to the game's log with what the pantograph was doing, so
-                // that a sound heard for no reason can be traced afterwards
+                // logged, to trace stray sounds
                 if (panto_wanted[pan] != _panto_wanted[pan])
                 {
                     play(panto_wanted[pan] ? "panto_valve_up" : "panto_valve_down");
-                    Main.release_log($"EU07 audio: pantograph {pan} valve {(panto_wanted[pan] ? "up" : "down")} at {_clock:F1} s, raised {raised[pan]:F3}");
+                    Main.log($"EU07 audio: pantograph {pan} valve {(panto_wanted[pan] ? "up" : "down")} at {_clock:F1} s, raised {raised[pan]:F3}");
                 }
-                // ...and only with its switch OFF. With the switch on, the pan is sent to its
-                // stops whenever the wire's height reads lower than the pan can go (the catenary
-                // mod's pantograph follows whatever height it is given), and each time was a
-                // landing heard for no reason: "i still get random panto drop audio".
+                // landing only with switch off: with it on, the catenary mod drops the pan
+                // whenever the wire reads below its reach
                 if (_going[pan] > 0 && raised[pan] <= 0.02f)
                 {
                     if (!panto_wanted[pan])
                         play("panto_drop");
-                    Main.release_log($"EU07 audio: pantograph {pan} on its stops at {_clock:F1} s, switch {(panto_wanted[pan] ? "ON - no sound" : "off - landing")}, was at {_raised[pan]:F3}");
+                    Main.log($"EU07 audio: pantograph {pan} on its stops at {_clock:F1} s, switch {(panto_wanted[pan] ? "ON - no sound" : "off - landing")}, was at {_raised[pan]:F3}");
                 }
             }
             if (raised[pan] >= 0.30f)
-                _going[pan] = 1;                        // well up: the next arrival at the stops is a landing
+                _going[pan] = 1;                        // well up: next stop arrival = landing
             else if (raised[pan] <= 0.02f)
                 _going[pan] = 0;
             _raised[pan] = raised[pan];

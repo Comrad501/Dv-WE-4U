@@ -1,31 +1,16 @@
-// EU07 for Derail Valley - the shell: one spawned locomotive's power circuit, bound to the
-// ports of its Custom Car Loader prefab.
+// EU07 driver: one loco's power circuit <-> its CCL prefab ports
+// prefab from Knsgf's example railcar; desk type told by its ports (unity/Assets/Editor/eu07_build.cs)
+//   v1  Knsgf desk + clones: throttle = 44-pos wheel, 4 switches, field lever on dyn brake keys
+//   v2  docs/desk/design_desk.md: 44-notch wheel, push-buttons (event-read), switches, signal lamps
 //
-// CRUDE, on purpose. The prefab is Knsgf's example railcar with new numbers, and one of two
-// desks (unity/Assets/Editor/eu07_build.cs, -eu07desk). The driver finds out which from the
-// ports the prefab has:
-//
-//   v1  Knsgf's desk with clones. The throttle lever IS the controller wheel, cut into 44
-//       positions; four switches right of the pantograph switches: fast breaker (read for
-//       its level), relay reset (flip it either way), line contactors off (each flip is one
-//       press of the button), high start; and a field lever on the dynamic brake's keys
-//   v2  docs/desk/design_desk.md: a 44-notch controller wheel, push-buttons for WS on and off, OPN,
-//       WJ1, PLW and PLP, switches for the converter, compressors and train heating, the
-//       real signal lamps. The buttons are taken from their ports' events, not polled
-//
-//   - and always the numeric keypad, for those who have one, and only for the locomotive
-//     you are standing in:
+// keypad (developer only, loco you are in):
 //
 //         7   fast breaker ON             1   fast breaker OFF
 //         5   reset relays (OPN and WJ1)  0   hold: line contactors off (PLW)
 //         +   field weakening, a step     -   field weakening, a step back
 //         9   high start on / off         3   this panel on / off
 //
-//   - without switches of their own (v1) the converter and both compressors are switched on
-//     for you
-//   - a panel in the corner of the screen stands in for the meters and the lamps
-//
-// What it reads and writes by port id is the contract with the prefab: see the constants.
+// port ids below = contract with the prefab
 
 using System;
 using System.Collections;
@@ -49,34 +34,31 @@ internal class eu07_driver: MonoBehaviour
     public const string port_wheel_RPM     = "traction.WHEEL_RPM_EXT_IN";
     public const string port_supply_volts  = "busBar.SUPPLY_VOLTAGE";        // Knsgf's bus bar
     public const string port_torque        = "eu07.TORQUE_OUT";              // wired to traction.TORQUE_IN
-    // running resistance beyond the game's own rolling resistance: 12 N a km/h and 0.42 N a (km/h)2,
-    // which is 5.4 kN at 100 km/h and 7.5 kN at 120
+    // drag on top of game rolling resistance, Davis B+C: 12 N/(km/h) + 0.42 N/(km/h)^2 (5.4 kN @ 100)
     public const float drag_newtons_per_kmh = 12.0f, drag_newtons_per_kmh2 = 0.42f, wheel_radius_metres = 0.625f;
     public float running_drag_newtons { get; private set; }
     public const string port_line_current  = "eu07.LINE_CURRENT";            // read by busBar.CURRENT_DRAW
     public const string port_ammeter_12    = "eu07.AMMETER_12";
     public const string port_ammeter_34    = "eu07.AMMETER_34";
-    public const string port_position      = "eu07.CONTROLLER_POSITION";     // 0-43, where the contactors are
-    // The speed recorder's clock and distance counter (v2 prefab only): its two hands, the six
-    // drums of its counter, and the kilometres run, which the game keeps over a save.
+    public const string port_position      = "eu07.CONTROLLER_POSITION";     // 0-43, contactor position
+    // speed recorder clock + odometer (v2 only); km saved
     public const string port_clock_hours   = "eu07.CLOCK_HOURS";             // 0-12
     public const string port_clock_minutes = "eu07.CLOCK_MINUTES";           // 0-60
-    public const string port_odometer      = "eu07.ODOMETER_";               // + 0..5, each 0-10: what its drum shows
+    public const string port_odometer      = "eu07.ODOMETER_";               // + 0..5, each drum 0-10
     public const string control_odometer   = "odometer.EXT_IN";              // km
     public const string port_field         = "eu07.FIELD_POSITION";          // 0-6
     public const string port_fan_speed     = "eu07.RESISTOR_FAN_SPEED";
     public const string port_converter     = "eu07.CONVERTER_SPEED";
     public const string port_resistor_heat = "eu07.RESISTOR_HEAT";           // W
     public const string port_motor_heat    = "eu07.MOTOR_HEAT";              // W
-    // the EU07's own handles on the desk, each a control in the simulation; where the prefab
-    // has none the keypad still works. Both desks:
-    public const string port_relay_reset   = "relayReset.EXT_IN";          // v1 switch: either way resets OPN and WJ1; v2 button OPN
-    public const string port_line_off      = "lineContactorsOff.EXT_IN";   // v1 switch: every flip is one press of PLW; v2 button, held
+    // desk controls, both desks
+    public const string port_relay_reset   = "relayReset.EXT_IN";          // v1 switch: any flip resets OPN+WJ1; v2 button OPN
+    public const string port_line_off      = "lineContactorsOff.EXT_IN";   // v1 switch: each flip = PLW press; v2 button, held
     public const string port_high_start    = "highStart.EXT_IN";           // switch
     public const string port_field_lever   = "fieldLever.EXT_IN";          // 0-1 over 7 notches
     // v1 only
     public const string port_fast_breaker  = "fastBreaker.EXT_IN";         // switch: up closes, down opens
-    // v2 only. Buttons are 1 while held (hold mode); presses are their rising edges
+    // v2 only; buttons 1 while held, press = rising edge
     public const string port_breaker_on    = "fastBreakerOn.EXT_IN";       // button WJ7,8
     public const string port_breaker_off   = "fastBreakerOff.EXT_IN";      // button WJ5,6
     public const string port_aux_reset     = "auxRelayReset.EXT_IN";       // button WJ1
@@ -84,7 +66,7 @@ internal class eu07_driver: MonoBehaviour
     public const string port_converter_switch  = "converterSwitch.EXT_IN";  // switch WDG
     public const string port_compressor_switch = "compressorSwitch.EXT_IN"; // switch WDC1,2
     public const string port_heating_switch    = "heatingSwitch.EXT_IN";    // switch WDO3,4
-    // lamps, 0 or 1, named as on the DTR's signal panel
+    // lamps 0/1, names from the DTR signal panel
     public const string lamp_fast_breaker  = "eu07.LAMP_LSS";
     public const string lamp_line_open     = "eu07.LAMP_LS10";
     public const string lamp_resistors     = "eu07.LAMP_LS5";
@@ -96,91 +78,47 @@ internal class eu07_driver: MonoBehaviour
     public const string lamp_auxiliary     = "eu07.LAMP_LSPO";
     public const string lamp_compressor    = "eu07.LAMP_LSC";
     public const string lamp_heating       = "eu07.LAMP_LSGP";               // v2 prefab only
-    // The last-mile battery (eu07_power_circuit.cs; v2 prefab only): its switch, its lamp (lit
-    // while the traction circuit is on it), its meter, and what is left in it, which the game
-    // keeps over a save as it keeps the kilometres.
+    // LAST-MILE BATTERY (eu07_power_circuit.cs; v2 only); charge saved
     public const string port_battery_switch = "batterySwitch.EXT_IN";       // switch
     public const string control_battery     = "batteryCharge.EXT_IN";       // 0-1 of full
     public const string port_battery_charge = "eu07.BATTERY_CHARGE";        // 0-100
     public const string lamp_battery        = "eu07.LAMP_BATTERY";
 
-    // THE 110 V (eu07_low_voltage.cs): its battery behind the game's main-electrics fuse - the
-    // "Bateria" switch under the flap in the assistant's desk - and the breakers beside it, each
-    // a fuse of the game's own fuse box. In the order of eu07_sim.low_breaker.
+    // THE 110 V (eu07_low_voltage.cs): battery = game main-electrics fuse ("Bateria" under the flap)
+    // breakers = game fuses, in eu07_sim.low_breaker order
     public const string fuse_battery = "fusebox.ELECTRICS_MAIN";
     private static readonly string[] breaker_fuses = { "fusebox.B_FANS", "fusebox.B_CONVERTER", "fusebox.B_COMPRESSORS", "fusebox.B_CAB_HEATING", "fusebox.B_PANTOGRAPHS",
         "fusebox.B_SANDING", "fusebox.TM_POWER", "fusebox.B_WINDSCREENS", "fusebox.B_LIGHTING", "fusebox.B_HEADLIGHTS" };
-    // Three fuses with no lever, that are set HERE and nowhere else: the game's headlights, cab
-    // light and sander have them for their power fuse, and so go by the 110 V and their breakers.
+    // lever-less fuses set only here: headlights, cab light, sander follow the 110 V
     private const string fed_headlights = "fusebox.FED_HEADLIGHTS", fed_lighting = "fusebox.FED_LIGHTING", fed_sanding = "fusebox.FED_SANDING";
-    public const string control_low_battery = "lowBatteryCharge.EXT_IN";    // 0-1 of full, kept over a save
-    public const string port_low_volts      = "eu07.LOW_VOLTS";             // the 110 V bus, for the desk's low-voltage voltmeter
-    // THE FAULT LAMP ("we also need a general fault indicator and a motor temp indicator, so we
-    // follow the Dv standard", the author, 2026-10-11). It was first one lamp for everything of
-    // OURS that can let go; then, the game's own lamps having been read (NOTES, 23:40): "we
-    // already have our status lights for those, im thinking we make the fault lamp adress the
-    // stock stuff". So it says what the GAME's two motor lamps say, and nothing that a lamp
-    // of this desk says already:
-    //   BLINKING  the motors' breaker is out - the game's own, which the game throws out for
-    //             heat, for power against the motors' turning, for water (here it is the
-    //             "Control" breaker under the flap) - or the motors are at 105 C;
-    //   STEADY    a traction motor is dead, or the motors are at 90 C;
-    //             and ("What about the brake fault and low resource statuses?", the same
-    //             evening) the game's BRAKE warning, by the game's own checker - a leak, any
-    //             handbrake on in the train, not exactly one driver's valve cut in, cars coupled
-    //             without their air; and something RUNNING OUT, at the figures of the game's
-    //             own lamps - sand under a tenth, a battery under a quarter (the 110 V one;
-    //             the last-mile one while its switch is on).
-    // With the game's warning sound as it comes on, as it goes from steady to blinking, and as
-    // one more thing joins what it already shows. Blinking - the game's continuous buzz with
-    // it - is kept for what wants doing NOW; a handbrake left on is steady and quiet.
-    public const string lamp_fault          = "eu07.LAMP_FAULT";            // the game's own lamp codes: 0 off, 1 on, 3 blinking; 2 and 4 the same with the sound
-    public const float  motors_warm_celsius = 90.0f, motors_hot_celsius = 105.0f;       // the game's: its lamp comes on, its lamp blinks
-    public const float  sand_low = 0.10f, battery_low = 0.25f;                           // the game's DE6 for sand, its shunter for a battery
-    // ACKNOWLEDGED: the button under the lamp. What blinks when it is pressed is "seen": the lamp
-    // stands steady and the buzz stops, for as long as that same thing lasts. A cause that goes
-    // away is forgotten, so that it blinks again if it comes back; a new one blinks at once.
+    public const string control_low_battery = "lowBatteryCharge.EXT_IN";    // 0-1, saved
+    public const string port_low_volts      = "eu07.LOW_VOLTS";             // 110 V bus voltmeter
+    // THE FAULT LAMP: game-style, only what no other desk lamp shows
+    //   blinking: TM breaker out ("Control"), motors 105 C, grids red hot, foreign unit critical, both cabs in
+    //   steady: dead TM, motors 90 C, game brake warning, sand < 10 %, battery < 25 %
+    // sound on: lamp on, to blinking, or new cause
+    public const string lamp_fault          = "eu07.LAMP_FAULT";            // game lamp codes: 0 off, 1 on, 3 blink; 2/4 = same + sound
+    public const float  motors_warm_celsius = 90.0f, motors_hot_celsius = 105.0f;       // game's lamp on / blink
+    public const float  sand_low = 0.10f, battery_low = 0.25f;                           // game's DE6 sand, shunter battery thresholds
+    // ack button: blinking -> steady + quiet while that cause lasts; new/returning cause blinks again
     public const string port_fault_ack = "faultAck.EXT_IN";
     private int   _want_fault_ack = 0;
-    // THE GAME'S OWN VIGILANCE DEVICE, ANSWERED FROM THE DESK ("to have one of those wood cabinets open up, and to
-    // have space for the stock stuff, like the vigilance box. that would connect to our system and we can answer
-    // the box's vigillance with our click", the author, 2026-10-13). The box is the game's gadget, GadgetATS, mounted
-    // by the player in the instrument cupboard under the desk. Read in the game: it counts down while the wheels
-    // turn, warns when the count runs out, and five seconds on shuts the throttle and puts the train brake full on;
-    // its own button does one thing - sets the count back - and the count is a public field. So:
-    //  - the desk's vigilance button sets the count back, exactly as the box's own button does;
-    //  - the lamp over the button blinks, with the game's buzz, while the box warns;
-    //  - while the box is stopping the train the line contactors are held out (PLW's own way), which is what
-    //    cuts power on THIS locomotive - its throttle is a wheel of notches the box cannot wind back;
-    //  - the box is powered by a fuse set here: the 110 V there, the control breaker in, and the locomotive not
-    //    being hauled dead (power_circuit.train_protection_live, left for this on the 12th).
-    // No box aboard: none of it does anything.
+    // VIGILANCE: the game's GadgetATS in the desk cupboard; counts down while moving, warns, stops 5 s on
+    // desk button resets its public count; lamp blinks while warning; stopping holds line contactors out
+    // fed via fed_gadgets (power_circuit.train_protection_live)
     public const string port_vigilance = "vigilance.EXT_IN", lamp_vigilance = "eu07.LAMP_VIGILANCE";
     private const string fed_gadgets = "fusebox.FED_GADGETS";
-    // THE LAMP FIRST, THEN THE BUZZER ("the Czuwak flashes before buzzing ... yes, 3 s lamp then 2 s buzz. but we
-    // have to have it work with the in game one. is there a way to mute the gadget buzzer and use our own?", the
-    // author, 2026-10-13). The real device (an operator's own account, Koleje Slaskie; the Polish Wikipedia's the
-    // same): the lamp alone for about 3 s, then the buzzer with it, and 2 s after that the brake. The game's box
-    // warns for 5 s before it stops the train, so the two fit: of its five seconds the first three are the lamp
-    // in the box on the sill, blinking and silent, and from the fourth on the cab's own buzzer sounds as well
-    // (eu07_audio: the buzzer synthesised for the high start) until the driver answers.
-    // THE BOX'S OWN BUZZ is its little state lamp's: a LampControl whose blinking carries a looped clip (read in
-    // the game: GadgetATSLOD.stateLamp, LampControl.blinkStateBuzzingLoopAudio). While the box is on THIS
-    // locomotive those clips are taken off it, and kept, and given back the moment it is on this locomotive no
-    // longer - on anything else it buzzes as the game made it.
-    public const float vigilance_lamp_alone = 3.0f;            // seconds of lamp before the buzzer joins it
-    // THE STOP IS THE LOCOMOTIVE'S OWN. The game's box no longer works the handles of one of ours (Main.cs,
-    // vigilance_box_on_ours). When its warning has run out the device's valve opens and empties the brake pipe -
-    // the whole train's, at the rate the game's own brake valve does in its emergency place (150) - for as long as
-    // the device goes unanswered; and the line contactors are held out with it. Before that valve stands a COCK, on
-    // the cab's back wall under the high-voltage one: shut, the device lights its lamp and sounds its buzzer and
-    // can do no more. It is kept in the save, and starts open.
+    // real Czuwak: 3 s lamp, then buzzer, brake 2 s later (Koleje Slaskie) = game box's 5 s
+    // box's own buzz = GadgetATSLOD.stateLamp clips: removed while aboard, restored after
+    public const float vigilance_lamp_alone = 3.0f;            // s of lamp before buzzer
+    // stop done here, not by the box (Main.cs, vigilance_box_on_ours): vents brake pipe at game emergency rate
+    // isolating cock on cab back wall; saved, starts open
     public const string port_vigilance_cock = "vigilanceCock.EXT_IN";
     public const float vigilance_dump = 150.0f;
     private bool _vigilance_vents = false;
-    // (half a second each at first: "up the speed of the blink. half it", the author - a quarter of a second each)
     public const float vigilance_lit_for = 0.25f, vigilance_dark_for = 0.25f;
     private DV.CabControls.ButtonBase? _vigilance_button;
+    private int _vigilance_button_cab = -1;          // its cab
     private bool _vigilance_key_holds = false;
     private float _vigilance_blinking = 0.0f;
     private bool  _vigilance_lit = false;
@@ -189,17 +127,8 @@ internal class eu07_driver: MonoBehaviour
     private bool  _vigilance_asks = false, _vigilance_stops = false, _vigilance_buzzes = false;
     private int   _want_vigilance = 0, _vigilance_answers = 0;
     private readonly List<(LampControl lamp, AudioClip? warning, AudioClip? on, AudioClip? blinking)> _vigilance_hushed = new();
-    // THE SHP BOX ("time for our own SHP box. It should only spawn in shops when the Signal mod is in", and "shp box
-    // should ship with our signalling mod", the author, 2026-10-14). The box is the signalling mod's (dv-signal-
-    // dispatch, ShpBox.cs): a gadget made out of the game's vigilance device, mounted in the instrument cupboard
-    // beside it, that waits for a track magnet instead of counting seconds - and then warns and stops through the
-    // very same count, which is why this locomotive needs no knowledge of that mod to work with it. Told from the
-    // game's device by its name alone. Here it is the SAME apparatus as the vigilance device's, as on the real
-    // locomotive: the red lamp in the box on the sill, the same buzzer, the same button, the same valve and cock.
-    //  - the lamp is steady, not blinking, and the buzzer joins it after 2.5 s; the brake 2 s after that (the
-    //    signalling mod's times, from the PLK's and the ministry's own accounts of the device);
-    //  - the button is passed to the BOX's own button, so that the box's own rule holds: once it is braking it
-    //    is not answered above 10 km/h.
+    // SHP BOX: signalling mod's GadgetATS (dv-signal-dispatch, ShpBox.cs), told apart by name; magnet-triggered
+    // shares buzzer, button, valve, cock; steady lamp, buzzer at 2.5 s; ack via box's own button (no ack > 10 km/h braking)
     public const string shp_gadget_name = "ShpBox_Gadget", lamp_shp = "eu07.LAMP_SHP";
     public const float shp_lamp_alone = 2.5f;
     private DV.Customization.Gadgets.Implementations.GadgetATS? _shp;
@@ -219,7 +148,7 @@ internal class eu07_driver: MonoBehaviour
             if (_vigilance_hushed.Any(one => one.lamp == lamp))
                 continue;
             _vigilance_hushed.Add((lamp, lamp.warningAudio, lamp.onStateBuzzingLoopAudio, lamp.blinkStateBuzzingLoopAudio));
-            lamp.SetLampState(LampControl.LampState.Off);       // with its clips still on it: this is what stops a buzz already sounding
+            lamp.SetLampState(LampControl.LampState.Off);       // clips still on: stops a buzz in progress
             lamp.warningAudio = null;
             lamp.onStateBuzzingLoopAudio = null;
             lamp.blinkStateBuzzingLoopAudio = null;
@@ -231,7 +160,7 @@ internal class eu07_driver: MonoBehaviour
         foreach ((LampControl lamp, AudioClip? warning, AudioClip? on, AudioClip? blinking) in _vigilance_hushed)
         {
             if (lamp == null)
-                continue;                                       // the box was taken down and is an item again
+                continue;                                       // box removed
             lamp.warningAudio = warning;
             lamp.onStateBuzzingLoopAudio = on;
             lamp.blinkStateBuzzingLoopAudio = blinking;
@@ -244,7 +173,7 @@ internal class eu07_driver: MonoBehaviour
         bool gone = false;
         if (_vigilance != null && _vigilance.TrainCar != _car)
         {
-            _vigilance = null;                                  // taken off, or the same box mounted somewhere else
+            _vigilance = null;                                  // removed or moved
             gone = true;
         }
         if (_shp != null && _shp.TrainCar != _car)
@@ -254,7 +183,7 @@ internal class eu07_driver: MonoBehaviour
         }
         if (gone)
         {
-            unhush_vigilance();                                 // (whichever is still aboard is hushed again below)
+            unhush_vigilance();                                 // re-hushed below
             _hush_tried = -10.0f;
         }
         if ((_vigilance == null || _shp == null) && Time.time - _vigilance_sought > 1.0f && _car != null && _car.Customization != null)
@@ -271,7 +200,7 @@ internal class eu07_driver: MonoBehaviour
         bool pressed = take(ref _want_vigilance);
         DV.Customization.Gadgets.Implementations.GadgetATS? box = _vigilance;
         DV.Customization.Gadgets.Implementations.GadgetATS? shp = _shp;
-        if (Time.time - _hush_tried > 1.0f)                     // (a box's face is not there until the box is near enough to be seen)
+        if (Time.time - _hush_tried > 1.0f)                     // LOD face exists only when near
         {
             _hush_tried = Time.time;
             if (box != null)
@@ -286,7 +215,7 @@ internal class eu07_driver: MonoBehaviour
             float before = shp.currentTimer;
             DV.Customization.Gadgets.Implementations.GadgetATSLOD? face = shp.LODObjects.OfType<DV.Customization.Gadgets.Implementations.GadgetATSLOD>().FirstOrDefault();
             if (face != null)
-                face.OnAckButton();                             // the box's own button: the signalling mod's rule is in it
+                face.OnAckButton();                             // box's own button: its rule applies
             else
                 shp.currentTimer = shp.CurrentRegimeTimerLength;
             if (before < 0.0f && shp.currentTimer >= 0.0f)
@@ -313,33 +242,29 @@ internal class eu07_driver: MonoBehaviour
             ++_vigilance_answers;
             _vigilance_asks = _vigilance_stops = false;
         }
-        // (the box's count goes on down past nothing while it warns: how far past is how long it has been asking)
+        // count goes negative while warning = time warned
         _vigilance_buzzes = live && _vigilance_asks && box != null && -box.currentTimer >= vigilance_lamp_alone;
-        // THE LAMP IS BLINKED FROM HERE, NOT BY THE GAME ("... and the relay closing for every blink", the author,
-        // 2026-10-13). The game's blinking lamp keeps its own time, as fast as its glow rises and falls, and tells
-        // nobody when it lights. So the lamp is simply switched: lit for `vigilance_lit_for`, dark for
-        // `vigilance_dark_for`, starting lit; and every time it lights the device's relay is heard closing - the
-        // switchgear's relay click, in the cab.
+        // blink timed here (game blink gives no event); relay click per blink
         if (live && _vigilance_asks)
         {
             bool lit = _vigilance_blinking % (vigilance_lit_for + vigilance_dark_for) < vigilance_lit_for;
             _vigilance_blinking += Time.fixedDeltaTime;
             if (lit && !_vigilance_lit)
                 _audio?.sound("relay_click", 0.8f, "cab");
-            // ("also. add the open audio": the relay letting go as the lamp goes dark - the same click, lighter and higher)
+            // relay release click
             if (!lit && _vigilance_lit)
                 _audio?.sound("relay_click", 0.5f, "cab", 1.25f);
             _vigilance_lit = lit;
         }
         else
         {
-            if (_vigilance_lit)                                 // answered with the lamp lit: the relay lets go then, too
+            if (_vigilance_lit)                                 // answered while lit: release click
                 _audio?.sound("relay_click", 0.5f, "cab", 1.25f);
             _vigilance_blinking = 0.0f;
             _vigilance_lit = false;
         }
         write(lamp_vigilance, _vigilance_lit ? 1.0f : 0.0f);
-        // (one valve for both devices, and one cock before it)
+        // one valve + cock for both devices
         _vigilance_vents = live && (_vigilance_stops || _shp_stops) && read(port_vigilance_cock, 1.0f) > 0.5f;
         if (_vigilance_vents && _car != null && _car.brakeSystem != null && _car.brakeSystem.brakeset != null)
         {
@@ -349,50 +274,37 @@ internal class eu07_driver: MonoBehaviour
         if (_audio != null)
             _audio.vigilance_buzzer = _vigilance_buzzes || _shp_buzzes;
     }
-    private readonly bool[] _fault_seen = new bool[4];          // of the four that blink: the motors' breaker out, the motors at 105 C, the resistor grids red hot, a foreign unit of the train saying "critical"
+    private readonly bool[] _fault_seen = new bool[5];          // the 5 blinking causes, see said[]
     private int   _fault_level = 0, _fault_causes = 0;
     private float _fault_code = 0.0f;
     private bool  _fault_buzz_owed = false;
     private DV.Simulation.Brake.BrakeWarningChecker? _brake_checker;
     public const string port_cab_heating    = "cabHeatingSwitch.EXT_IN";
-    // The desk's pantograph switches ASK; the railcar's own switch controls are what its valves obey.
+    // desk switch asks; railcar switch drives the valve
     private static readonly (string ask, string valve)[] pantograph_ports =
         { ("pantographAsk.EXT_IN", "pantographSwitch.EXT_IN"), ("pantograph2Ask.EXT_IN", "pantograph2Switch.EXT_IN") };
     private readonly eu07_sim.low_voltage _low = new();
     private Fuse?  _control_power;
     private bool   _has_breakers = false;
-    private float  _low_kept = -1.0f;         // what the save has of the 110 V battery's charge; under 0: not yet read from it
+    private float  _low_kept = -1.0f;         // saved 110 V charge; < 0: unread
 
-    // THE PANTOGRAPHS' AIR and the small compressor that makes it from the battery
-    // (eu07_sim.pantograph_air), in the machine room by the outside door behind cab A's handbrake;
-    // and the room's own lamps, which the mod turns on and off by the switch at each passage door.
-    public const string port_small_compressor = "smallCompressor.EXT_IN";   // its switch, beside it
-    public const string control_panto_air     = "pantoAir.EXT_IN";          // bar + 1, kept over a save; 0: never kept
-    public const string port_panto_air        = "eu07.PANTO_AIR";           // bar, for its gauge
-    public const string port_panto_cock       = "pantoCock.EXT_IN";         // the three-way cock: 1 = on the small compressor
-    // the frame's labelled cocks: 1 = open. Three stand open, the drain shut.
-    public const string port_cock_control_air = "controlAirCock.EXT_IN";    // the main reservoir into the pantographs' and control circuit
-    public const string port_cock_panto_air   = "pantoAirCock.EXT_IN";      // that circuit to the pantographs
-    public const string port_cock_drain       = "drainCock.EXT_IN";         // that circuit to the open air
-    public const string port_cock_main_res    = "mainResCock.EXT_IN";       // the main compressor's delivery into the main reservoir
-    public const string port_room_light_a     = "roomLightA.EXT_IN", port_room_light_b = "roomLightB.EXT_IN";   // two-way: either changes them
-    // THE HIGH VOLTAGE BY HAND: the interlock cock on the cab's back wall (1 = P, shut away; 0 =
-    // open - the pantographs come down and stay down, the line breaker is thrown out), the two
-    // motor isolators on the cage (1 = that pair cut out; the game itself holds their handles
-    // while the cock is at P or the wheel off 0), the converter's knife switch (1 = pulled).
+    // PANTOGRAPH AIR + small compressor (eu07_sim.pantograph_air); machine room lamps
+    public const string port_small_compressor = "smallCompressor.EXT_IN";   // its switch
+    public const string control_panto_air     = "pantoAir.EXT_IN";          // bar + 1, saved; 0: never saved
+    public const string port_panto_air        = "eu07.PANTO_AIR";           // bar, gauge
+    public const string port_panto_cock       = "pantoCock.EXT_IN";         // 3-way cock: 1 = small compressor
+    // frame cocks, 1 = open; drain normally shut
+    public const string port_cock_control_air = "controlAirCock.EXT_IN";    // main res -> panto/control circuit
+    public const string port_cock_panto_air   = "pantoAirCock.EXT_IN";      // circuit -> pantographs
+    public const string port_cock_drain       = "drainCock.EXT_IN";         // circuit -> atmosphere
+    public const string port_cock_main_res    = "mainResCock.EXT_IN";       // compressor -> main res
+    public const string port_room_light_a     = "roomLightA.EXT_IN", port_room_light_b = "roomLightB.EXT_IN";   // two-way switching
+    // HV BY HAND: interlock cock (1 = P; 0 = pantos down, breaker out), motor isolators (1 = pair out),
+    // converter knife (1 = pulled)
     public const string port_hv_interlock = "hvInterlock.EXT_IN", port_converter_knife = "converterKnife.EXT_IN";
-    public const string port_hauled = "hauledRun.EXT_IN";                  // the switch behind the driver: 1 = jazda ciagniona (hauled), 0 = train running
-    // CAB CUT OUT ("we just put a cab cutout option, which ignores desk I/O and lets the leader do the I/O",
-    // the author, 2026-10-12, of two things a multiple unit still wanted: a follower's switches as the
-    // leader's stand from the moment they are joined, and somebody to see a follower's lamps). The switch
-    // beside the hauled-run one. Set, and joined to another WE-4U whose cab is NOT cut out (by the game's
-    // cable or its radio), this locomotive is a FOLLOWER:
-    //   IN   its desk is held (the game's own lock on every handle the leader has), and every control in
-    //        leader_sets is made what the leader's is, every step - whatever it was when they were joined;
-    //   OUT  its lamps light on the LEADER's desk as well as its own, its fault lamp counts there, and the
-    //        leader's battery gauge shows the lower of the charges.
-    // Throttle, brakes, reverser and sander are the game's to pass on, and it does. The battery, the
-    // breakers and the lights stay each locomotive's own.
+    public const string port_hauled = "hauledRun.EXT_IN";                  // 1 = jazda ciagniona (hauled dead)
+    // CAB CUT OUT + joined to a leading WE-4U = FOLLOWER: desk locked, leader_sets copied each step;
+    // its lamps/faults also on leader's desk; game passes throttle, brakes, reverser, sander
     public const string port_cab_cutout = "cabCutout.EXT_IN";
     private static readonly string[] leader_sets =
     {
@@ -401,24 +313,14 @@ internal class eu07_driver: MonoBehaviour
         "fieldLever.EXT_IN", "batterySwitch.EXT_IN",
     };
     private bool _cab_cut_out = false, _desk_held = false;
-    // LED BY A FOREIGN DESK ("Does the game know how to bocznikowanie? we dont want to overheat under way", the
-    // author, 2026-10-12): the throttle comes from a vehicle that is not one of ours - a diesel, by the
-    // game's cable with this cab cut out and none of ours leading, or by the game's radio transmitting to
-    // this one. The game sends a throttle and nothing else, so the wheel and the field lever are
-    // then worked here: eu07_auto_notching.cs.
+    // FOREIGN-LED: throttle only, from a non-WE-4U (cable or radio) -> auto notching (eu07_auto_notching.cs)
     private bool _foreign_led = false, _foreign_in_group = false;
     private float _not_charging_for = 0.0f;
-    private DV.Simulation.Controllers.ControlBlocker? _hold_seen;         // one of the desk's locks, to see whether the hold still stands
+    private DV.Simulation.Controllers.ControlBlocker? _hold_seen;         // sample lock, to check the hold
     private int _holds_put_back = 0;
-    public const string port_train_lights_front = "trainLightsFront.EXT_IN", port_train_lights_rear = "trainLightsRear.EXT_IN";     // what a leading vehicle's lamp selector says
-    // WHAT THE OTHER UNITS OF A TRAIN ARE TOLD OF THIS ONE, and this one of them, by the game's own means:
-    // a temperature each unit says (MultipleUnitStateObserver), 90 and over a warning, 105 and over
-    // critical, for which every desk in the train lights its motor-temperature lamp, steady or
-    // blinking. Ours says its motors' heat, as the game's do - and says "critical" when POWER IS
-    // ASKED OF IT AND IT CANNOT GIVE ANY: the overload relays out, the main breaker open, an earth
-    // fault, the motors' breaker out. Behind a diesel nobody sees its desk, and a unit that has
-    // dropped its load is otherwise only felt. NOT when the hauled-run switch is up: then it is
-    // meant to be dead. Also its grids: warm a warning, red hot critical.
+    public const string port_train_lights_front = "trainLightsFront.EXT_IN", port_train_lights_rear = "trainLightsRear.EXT_IN";     // leader's lamp selector
+    // MU STATE (game MultipleUnitStateObserver): temp 90+ warning, 105+ critical, on every desk
+    // ours: motor temp; critical if power asked but none given (not when hauled); grids warm/hot
     public const string port_said_celsius = "eu07.SAID_CELSIUS";
     public const float  said_warning_celsius = 95.0f, said_critical_celsius = 110.0f, refused_seconds = 1.0f;
     private float _refused_for = 0.0f, _said_celsius = -1.0f;
@@ -429,7 +331,7 @@ internal class eu07_driver: MonoBehaviour
     private List<eu07_driver> _followers = new();
     private readonly Dictionary<string, bool> _own_lamps = new();
 
-    // every locomotive of ours joined to this one, by cable either way along the train or by radio; itself first
+    // WE-4Us joined by cable or radio, self first
     private List<eu07_driver> multiple_unit_group()
     {
         List<eu07_driver> group = new() { this };
@@ -445,7 +347,7 @@ internal class eu07_driver: MonoBehaviour
             eu07_driver? driver = all.Find(one => one != null && one._car == module.train);
             if (driver == null)
             {
-                _foreign_in_group = true;           // joined to something that is not one of ours
+                _foreign_in_group = true;           // non-WE-4U in the group
                 if (module.TryGetComponent(out DV.Simulation.Cars.MultipleUnitStateObserver theirs))
                     _foreign_says |= theirs.CarTemperatureState;
             }
@@ -474,14 +376,64 @@ internal class eu07_driver: MonoBehaviour
         return group;
     }
 
+    // TWO CABS, ONE LIVE: <control>A/B (eu07_build.cs, cab_driving) -> canonical control; cab B reverser inverted
+    // dead cab locked via eu07.CAB_A_LIVE/B_LIVE; no live cab = cab cut out; on load handles take saved values
+    private static readonly (string control, string canonical, bool turned)[] cab_driving =
+    {
+        ("throttle", "throttle.EXT_IN", false), ("reverser", "reverser.CONTROL_EXT_IN", true), ("brake", "brake.EXT_IN", false),
+        ("indBrake", "indBrake.EXT_IN", false), ("sander", "sander.CONTROL_EXT_IN", false), ("hornControl", "hornControl.EXT_IN", false),
+        ("brakeCutout", "brakeCutout.EXT_IN", false),
+        ("fastBreakerOn", "fastBreakerOn.EXT_IN", false), ("fastBreakerOff", "fastBreakerOff.EXT_IN", false), ("relayReset", "relayReset.EXT_IN", false),
+        ("auxRelayReset", "auxRelayReset.EXT_IN", false), ("lineContactorsOff", "lineContactorsOff.EXT_IN", false), ("wheelSlip", "wheelSlip.EXT_IN", false),
+        ("faultAck", "faultAck.EXT_IN", false), ("vigilance", "vigilance.EXT_IN", false), ("fieldLever", "fieldLever.EXT_IN", false),
+        ("highStart", "highStart.EXT_IN", false), ("converterSwitch", "converterSwitch.EXT_IN", false), ("compressorSwitch", "compressorSwitch.EXT_IN", false),
+        ("heatingSwitch", "heatingSwitch.EXT_IN", false), ("pantographAsk", "pantographAsk.EXT_IN", false), ("pantograph2Ask", "pantograph2Ask.EXT_IN", false),
+    };
+    public const string port_cab_b_cutout = "cabCutoutB.EXT_IN";
+    private const int cab_a = 0, cab_b = 1, no_cab = 2;
+    private int _live_cab = -1;                                             // < 0: unchecked since load
+    private bool _both_cabs_in = false;                                     // both cabs in: fault lamp
+    private readonly float[,] _cab_seen = new float[2, cab_driving.Length];  // handles as last copied
+    public int live_cab => _live_cab;
+
+    private void cab_step()
+    {
+        bool two_cabs = _ports.ContainsKey(port_cab_b_cutout);
+        bool a_in = read(port_cab_cutout) < 0.5f, b_in = two_cabs && read(port_cab_b_cutout) < 0.5f;
+        int live = a_in && !b_in ? cab_a : b_in && !a_in ? cab_b : no_cab;
+        _both_cabs_in = a_in && b_in;
+        if (live != _live_cab && _car != null)
+            Main.release_log($"EU07 {_car.ID}: {(live == no_cab ? "no cab live" : live == cab_a ? "cab A" : "cab B")} {(_live_cab < 0 ? "at the load" : "now")}");
+        write("eu07.CAB_A_LIVE", live == cab_a);
+        write("eu07.CAB_B_LIVE", live == cab_b);
+        if (live != no_cab && two_cabs)
+        {
+            string cab = live == cab_a ? "A" : "B";
+            for (int index = 0; index < cab_driving.Length; ++index)
+            {
+                (string control, string canonical, bool turned) = cab_driving[index];
+                string own = control + cab + ".EXT_IN";
+                if (!_ports.ContainsKey(own) || !_ports.ContainsKey(canonical))
+                    continue;
+                bool round = turned && live == cab_b;
+                if (_live_cab < 0)
+                    write(own, round ? 1.0f - read(canonical) : read(canonical));      // load: handle takes saved value
+                float handle = read(own);
+                if (_live_cab < 0 || live != _live_cab || handle != _cab_seen[live, index])
+                    write(canonical, round ? 1.0f - handle : handle);
+                _cab_seen[live, index] = handle;
+            }
+        }
+        _live_cab = live;
+    }
+
     private void multiple_unit_step()
     {
-        _cab_cut_out = read(port_cab_cutout) > 0.5f;
+        _cab_cut_out = _ports.ContainsKey(port_cab_b_cutout) ? _live_cab == no_cab : read(port_cab_cutout) > 0.5f;
         List<eu07_driver> group = multiple_unit_group();
         _leader = _cab_cut_out ? group.Find(one => one != this && !one._cab_cut_out) : null;
         _followers = _cab_cut_out ? new() : group.Where(one => one != this && one._cab_cut_out && one._leader == this).ToList();
-        // Who leads, if none of ours: by radio, whoever transmits to this one; by cable, with this cab cut out,
-        // whatever else is on the cable (the cab cut out is what says the throttle is not this desk's own).
+        // foreign leader: radio transmitter, or anything on the cable while cut out
         DV.MultipleUnit.MultipleUnitModule? own_module = _car != null ? _car.muModule : null;
         TrainCar? transmitter = own_module != null && own_module.UseWireless && !own_module.IsTransmitter && own_module.RemoteChannel != null && own_module.RemoteChannel.Transmitter != null
             ? own_module.RemoteChannel.Transmitter.train : null;
@@ -492,22 +444,15 @@ internal class eu07_driver: MonoBehaviour
             _foreign_led = by_radio || by_cable;
             Main.release_log($"EU07 {_car?.ID}: {(_foreign_led ? $"led by a foreign desk ({(by_radio ? "radio, " + transmitter?.ID : "cable, the cab cut out")}): notching by itself" : "its own wheel again")}");
         }
-        // A CAB THAT IS CUT OUT DOES NOTHING, led or not. (The desk was held only while somebody led her: with the
-        // switch up and nothing on the cable it was a live desk still - in the author's save of 21:20 the DH4's
-        // cable was out, "cab_cut_out True desk_held False". "we just put a cab cutout option, which ignores
-        // desk I/O", he had said of it.) With nobody leading, she also takes no power: below.
+        // cut-out desk always locked; no leader = no power
         bool held = _cab_cut_out || _leader != null || by_cable;
         if (held != _desk_held && _car != null)
         {
             _desk_held = held;
             Main.release_log($"EU07 {_car.ID}: cab cut out: {(held ? "following " + (_leader != null ? _leader._car?.ID : "a foreign desk") + ", the desk held" : "the desk free again")}");
         }
-        // THE HOLD IS KEPT, not given once ("cab cutout still allows me to give control the loco from the WE-4's cab.
-        // cab cut out is set to up", the author, 2026-10-12). It was put on the moment she became a follower,
-        // and the game takes it off again behind the mod's back: its multiple-unit module lets every lock
-        // go whenever it looks at its radio and finds none (MultipleUnitModule.SyncFromRadio - at a load, at
-        // a coupling). So every step one lock is looked at, and the hold put back, or let go, to what it
-        // should be. (A follower by the game's own radio is the game's to hold: left alone.)
+        // re-check lock each step: MultipleUnitModule.SyncFromRadio drops all locks (load, coupling)
+        // game-radio followers: the game's job
         DV.Simulation.Controllers.ControlsBlockController? blocks = _car != null && _car.SimController != null ? _car.SimController.controlsBlocker : null;
         bool the_games = own_module != null && own_module.UseWireless && !own_module.IsTransmitter;
         if (blocks != null && !the_games)
@@ -529,15 +474,15 @@ internal class eu07_driver: MonoBehaviour
                 write(port, theirs);
         }
     }
-    // what a vigilance device or a train stop must ask before it does anything (eu07_power_circuit.cs, train_protection_live)
+    // train protection powered? (eu07_power_circuit.cs)
     public bool train_protection_live => _power != null && _power.train_protection_live(_low.live);
     private static readonly string[] isolator_ports = { "motorIsolator12.EXT_IN", "motorIsolator34.EXT_IN" };
-    private int _isolators_set = -1;          // which pairs are out as the circuit has them (bit 0: 1-2, bit 1: 3-4); under 0: not yet given
+    private int _isolators_set = -1;          // bit 0: pair 1-2 out, bit 1: 3-4; < 0: unset
     private bool _hv_was_open = false;
-    // the lamps over the meters
-    public const string port_instrument_light = "instrumentLight.EXT_IN";
+    // instrument lights, cab A / B
+    public const string port_instrument_light = "instrumentLight.EXT_IN", port_instrument_light_b = "instrumentLightB.EXT_IN";
     private readonly eu07_sim.pantograph_air _air = new();
-    private float      _air_kept = -1.0f;     // under 0: not yet read from the save
+    private float      _air_kept = -1.0f;     // < 0: unread
     private Transform? _room_lights;
 
     private TrainCar?               _car;
@@ -550,27 +495,17 @@ internal class eu07_driver: MonoBehaviour
     private int   _field_wanted = 0;
     private float _breaker_switch = 0.0f, _reset_switch = 0.0f, _high_switch = 0.0f, _line_off_switch = -1.0f, _line_off_press = 0.0f;
     private bool  _line_off_key = false;
-    // THE PANEL ON THE SCREEN, AND THE KEYPAD. They were there from the first crude desk and
-    // had grown into a second set of instruments that says what is wrong and what to do about
-    // it. "Honestly. i think the debug screen we have now, should not stay. every other modded
-    // loco doesnt have one of these, and people will learn it the hard way" (the author,
-    // 2026-10-11). So for a player there is neither: the locomotive tells him what its desk,
-    // its lamps and its gauges tell him. Both remain a DEVELOPER's - where the mod's folder
-    // has the "debug" folder that also turns the status file and the command hook on - and
-    // there the panel starts hidden: keypad 3 shows it.
+    // ON-SCREEN PANEL + KEYPAD: developer only ("debug" folder); panel hidden, keypad 3
     private bool _panel = false;
     private bool _developer = false;
     private string _problem = "";
     private bool _desk_v2 = false;
 
-    // Presses, latched where they happen (a port's event, the keypad) and taken in
-    // FixedUpdate: a short click or key tap can fall between two physics steps. Ints for
-    // Interlocked, in case a port is set from another thread.
+    // presses latched, taken in FixedUpdate (short taps); ints for Interlocked
     private int _want_close, _want_open, _want_reset, _want_aux_reset;
     private readonly List<Action> _unhook = [];
 
-    // PLP, the wheel-slip brake button: read and shown, but nothing in the circuit takes it
-    // yet (a slip brake is the brake system's business, not power_circuit's).
+    // PLP slip brake button: read, not acted on yet
     public bool slip_button { get; private set; } = false;
 
     public static readonly List<eu07_driver> all = [];
@@ -599,7 +534,10 @@ internal class eu07_driver: MonoBehaviour
                 found.Append(port.id).Append(' ');
             }
         }
-        Main.release_log($"EU07 {car.ID} ({car.carLivery.id}): ports {found}");
+        Main.log($"EU07 {car.ID} ({car.carLivery.id}): ports {found}");
+        Main.log($"EU07 {car.ID}: the works' number on {eu07_works_plates.number(car)} plate(s)");
+        eu07_wreck.attach(car);
+        eu07_manual.attach(car);
         found.Clear();
         foreach (Fuse? fuse in car.SimController.SimulationFlow.AllFuses)
         {
@@ -609,7 +547,7 @@ internal class eu07_driver: MonoBehaviour
                 found.Append(fuse.id).Append(' ');
             }
         }
-        Main.release_log($"EU07 {car.ID}: fuses {found}");
+        Main.log($"EU07 {car.ID}: fuses {found}");
         foreach (SimComponent part in car.SimController.SimulationFlow.OrderedSimComps)
         {
             if (part is ElectricCompressor own)
@@ -617,10 +555,8 @@ internal class eu07_driver: MonoBehaviour
             if (part is HeatReservoir tank && tank.id == "tmHeat")
                 _reservoir_capacity = tank.heatCapacity;
         }
-        Main.release_log($"EU07 {car.ID}: compressors give {_compressor_rate:F0} bar l/s together");
-        // The wipers. The game wires ONE wiper control for a vehicle; this one has four wipers
-        // with a valve each. Each controller is called WiperLeftA ... and its control is the
-        // same with a small letter.
+        Main.log($"EU07 {car.ID}: compressors give {_compressor_rate:F0} bar l/s together");
+        // game: one wiper control per car; here 4, each own valve: WiperLeftA -> wiperLeftA.EXT_IN
         foreach (DV.Rain.WiperController wiper in car.GetComponentsInChildren<DV.Rain.WiperController>(true))
         {
             string control = char.ToLowerInvariant(wiper.name[0]) + wiper.name.Substring(1) + ".EXT_IN";
@@ -630,20 +566,18 @@ internal class eu07_driver: MonoBehaviour
                 _wiper_speeds.Add(-1);
             }
         }
-        Main.release_log($"EU07 {car.ID}: {_wipers.Count} wipers");
+        Main.log($"EU07 {car.ID}: {_wipers.Count} wipers");
 
-        // Control voltage is the 110 V's (low_voltage_step), where the prefab has its breakers;
-        // control air is simply there still. The auxiliary compressor is to come.
+        // control voltage from the 110 V (low_voltage_step) if prefab has breakers; control air always on
         Fuse control_power = new("eu07", new FuseDefinition("CONTROL_POWER", true));
         _control_power = control_power;
         _has_breakers = _fuses.ContainsKey(breaker_fuses[0]) && _fuses.ContainsKey(fed_headlights);
         _developer = eu07_debug.wanted;
-        // the game's own judge of the brakes (what its locomotives' brake lamps ask)
+        // game's brake warning checker
         DV.Simulation.Brake.BrakeWarningChecker brakes = new();
         brakes.SetTrainCar(car);
         _brake_checker = brakes;
-        // (as the game shuts down its keeper of coroutines is gone before this, and letting go threw: an exception,
-        // and a ping, at every quitting - debug/errors.txt, 2026-10-12)
+        // throws on quit (coroutine host gone)
         _unhook.Add(() =>
         {
             try
@@ -655,7 +589,8 @@ internal class eu07_driver: MonoBehaviour
             }
         });
         _room_lights = car.GetComponentsInChildren<Transform>(true).FirstOrDefault(one => one.name == "EU07RoomLights");
-        Main.release_log($"EU07 {car.ID}: the 110 V breakers {(_has_breakers ? "are in the prefab" : "are NOT in the prefab: control voltage is simply there")}");
+        if (!_has_breakers)
+            Main.release_log($"EU07 {car.ID}: the 110 V breakers are NOT in the prefab: control voltage is simply there");
         Fuse control_air   = new("eu07", new FuseDefinition("CONTROL_AIR"  , true));
 
         if (!_ports.TryGetValue(port_wheel_RPM, out Port wheel_RPM))
@@ -664,7 +599,7 @@ internal class eu07_driver: MonoBehaviour
         foreach (char letter in car.ID)
             seed = seed * 31 + letter;
         _power = new eu07_sim.power_circuit(control_power, control_air, [wheel_RPM], null, seed);
-        // Without switches of their own, the converter and compressors are simply on.
+        // no switches: converter + compressors always on
         if (!_ports.ContainsKey(port_converter_switch))
             _power.converter_switch = true;
         if (!_ports.ContainsKey(port_compressor_switch))
@@ -690,16 +625,14 @@ internal class eu07_driver: MonoBehaviour
         {
             on_press(port_breaker_on , () => Interlocked.Exchange(ref _want_close, 1));
             on_press(port_breaker_off, () => Interlocked.Exchange(ref _want_open, 1));
-            on_press(port_relay_reset, () => Interlocked.Exchange(ref _want_reset, 1));         // OPN: reset_relays only
+            on_press(port_relay_reset, () => Interlocked.Exchange(ref _want_reset, 1));         // OPN
             on_press(port_fault_ack  , () => Interlocked.Exchange(ref _want_fault_ack, 1));
             on_press(port_vigilance  , () => Interlocked.Exchange(ref _want_vigilance, 1));
-            on_press(port_aux_reset  , () => Interlocked.Exchange(ref _want_aux_reset, 1));     // WJ1: reset_auxiliary_relays only
+            on_press(port_aux_reset  , () => Interlocked.Exchange(ref _want_aux_reset, 1));     // WJ1
         }
     }
 
-    // A button's press is the rising edge of its port, caught from the port's own event:
-    // Port.Value's setter raises ValueUpdatedInternally on every change, whoever sets it
-    // (the desk, a key, the debug hook). Polled in FixedUpdate a short press could be lost.
+    // press = rising edge via ValueUpdatedInternally; polling could miss short presses
     private void on_press(string id, Action pressed)
     {
         if (!_ports.TryGetValue(id, out Port port))
@@ -723,8 +656,7 @@ internal class eu07_driver: MonoBehaviour
             fuse.ChangeState(on);
     }
 
-    // A desk lamp: dark without the 110 V, whatever it has to say.
-    // (a lamp of a follower whose cab is cut out lights on its leader's desk too)
+    // desk lamp: needs 110 V; followers' lamps also on leader's desk
     private void light(string id, bool lit)
     {
         bool fed = !_has_breakers || _low.live;
@@ -735,9 +667,10 @@ internal class eu07_driver: MonoBehaviour
         write(id, (lit || theirs) && fed);
     }
 
-    // THE 110 V, every step, before the power circuit's own: what the battery's switch and the
-    // breakers under the flap say, what hangs on the bus, and from that whether there is
-    // control voltage at all and which circuits are fed.
+    // THE 110 V, before the power circuit
+    private readonly List<(GameObject lamps, bool cab_b)> _instrument_lights = new();
+    private float _instrument_lights_next;
+
     private void low_voltage_step(eu07_sim.power_circuit power, float delta_seconds)
     {
         if (!_has_breakers)
@@ -751,18 +684,33 @@ internal class eu07_driver: MonoBehaviour
         low.battery_switch = !_fuses.TryGetValue(fuse_battery, out Fuse master) || master.State;
         for (int index = 0; index < breaker_fuses.Length; ++index)
             low.breaker[index] = !_fuses.TryGetValue(breaker_fuses[index], out Fuse breaker) || breaker.State;
-        // a running converter holds the bus and charges; so does the last-mile battery's own converter while its switch is on
+        // fed by converter, or last-mile battery while on
         low.supplied = power.converter_charging || (power.battery_wanted && power.battery_joules > 0.0f);
 
-        // the machine room's lamps: on the lighting's breaker, by their switch
+        // machine room lamps: lighting breaker, two-way
         bool room_lit = low.fed(eu07_sim.low_breaker.lighting) && (read(port_room_light_a) > 0.5f) != (read(port_room_light_b) > 0.5f);
-        bool meters_lit = low.fed(eu07_sim.low_breaker.lighting) && read(port_instrument_light) > 0.5f;
+        bool lighting_fed = low.fed(eu07_sim.low_breaker.lighting);
+        bool meters_lit_a = lighting_fed && read(port_instrument_light) > 0.5f, meters_lit_b = lighting_fed && read(port_instrument_light_b) > 0.5f;
         if (_car != null && _car.interior != null)
         {
-            // (the interior comes and goes with the player: looked for each time, it is a handful of children)
-            foreach (Transform found in _car.interior.GetComponentsInChildren<Transform>(true))
-                if (found.name == "EU07InstrumentLights" && found.gameObject.activeSelf != meters_lit)
-                    found.gameObject.SetActive(meters_lit);
+            // interior search ~1.2 ms: only when lamps lost/missing, max 1/s
+            // each cab's lamps by its switch; cab B = DeskB
+            if (_instrument_lights.Count == 0 ? Time.time >= _instrument_lights_next : _instrument_lights.Any(one => one.lamps == null))
+            {
+                _instrument_lights.Clear();
+                _instrument_lights_next = Time.time + 1.0f;
+                foreach (Transform found in _car.interior.GetComponentsInChildren<Transform>(true))
+                {
+                    if (found.name == "EU07InstrumentLights")
+                        _instrument_lights.Add((found.gameObject, found.GetComponentsInParent<Transform>(true).Any(up => up.name == "DeskB")));
+                }
+            }
+            foreach ((GameObject lamps, bool cab_b) in _instrument_lights)
+            {
+                bool meters_lit = cab_b ? meters_lit_b : meters_lit_a;
+                if (lamps != null && lamps.activeSelf != meters_lit)
+                    lamps.SetActive(meters_lit);
+            }
         }
         if (_room_lights != null && _room_lights.gameObject.activeSelf != room_lit)
             _room_lights.gameObject.SetActive(room_lit);
@@ -798,31 +746,30 @@ internal class eu07_driver: MonoBehaviour
                 watts += eu07_sim.pantograph_air.pump_watts;
             if (room_lit)
                 watts += 4.0f * 25.0f;
-            if (meters_lit)
+            if (meters_lit_a)
+                watts += 7.0f * 5.0f;
+            if (meters_lit_b)
                 watts += 7.0f * 5.0f;
         }
         low.load_watts = watts;
         low.simulate(delta_seconds);
         write(port_low_volts, low.volts);
         float celsius = read(port_motor_celsius, power.motor_celsius);
-        // The motors' breaker out counts only while traction is ASKED for - the reverser off
-        // neutral and the wheel off 0 - which is the game's own rule for its lamp
-        // (TractionMotorSet.ConnectionRequested): a breaker that is simply out on a standing
-        // locomotive is not a fault, and does not blink and buzz at whoever switches the battery on.
+        // TM breaker out counts only if traction asked (game rule, TractionMotorSet.ConnectionRequested)
         bool motors_out = _fuses.TryGetValue(fuse_motors, out Fuse motors_breaker) && !motors_breaker.State
                        && power.contactors.direction != 0 && power.contactors.wanted > 0;
         bool motor_dead = read("tm.WORKING_TRACTION_MOTORS", eu07_sim.motors) < eu07_sim.motors - 0.5f || power.health <= 0.0f;
         bool[] said =
         {
-            // (the grids: what running on the resistors too long costs - eu07_power_circuit.cs, "the grids that stay in".
-            // Steady from 400 C: get off the resistors, or ease the current. Blinking, with the sound, from 600: they are wearing.)
+            // blinking causes first (match _fault_seen); grids steady 400 C, blink 600 C
             motors_out, celsius >= motors_hot_celsius, power.grid_celsius >= eu07_sim.power_circuit.grids_hot_celsius,
-            // (and what a unit of the train that is not ours says of itself, as its own kind would show it: a diesel's motors hot)
+            // foreign unit's own state
             (_foreign_says & DV.Simulation.Cars.MultipleUnitStateObserver.TemperatureState.Critical) != 0,
+            // both cabs in: neither drives
+            _both_cabs_in,
             motor_dead, celsius >= motors_warm_celsius, power.grid_celsius >= eu07_sim.power_circuit.grids_warm_celsius,
             (_foreign_says & DV.Simulation.Cars.MultipleUnitStateObserver.TemperatureState.Warning) != 0,
-            // the main breaker in and the converter not giving its 110 V for a quarter of a minute: no charging, no
-            // compressors, no air through the motors - whatever stopped it (its switch, its breaker, its relay, its knife)
+            // breaker in, converter not charging 15 s
             (_not_charging_for = power.fast_breaker_closed && !power.converter_charging ? _not_charging_for + Time.fixedDeltaTime : 0.0f) >= 15.0f,
             _brake_checker != null && _brake_checker.BrakeWarningState,
             read("sand.NORMALIZED", 1.0f) < sand_low,
@@ -837,10 +784,7 @@ internal class eu07_driver: MonoBehaviour
         for (int urgent = 0; urgent < _fault_seen.Length; ++urgent)
             blinking |= said[urgent] && !_fault_seen[urgent];
         int level = !low.live || causes == 0 ? 0 : blinking ? 2 : 1;
-        // The lamp's codes are the game's: 1 on, 3 blinking, and 2 and 4 the same WITH its sound,
-        // which is heard once as the code is given. So the sound as it gets worse - a level up,
-        // or one more cause at the same level, where the code must be taken away for a step
-        // and given again to be heard.
+        // sound plays once per code set: to re-sound, quiet code for one step first
         float quiet = level == 0 ? 0.0f : level == 1 ? 1.0f : 3.0f, loud = level == 1 ? 2.0f : 4.0f;
         bool worse = level > _fault_level || (level == _fault_level && level > 0 && causes > _fault_causes);
         if (level == 0)
@@ -875,23 +819,15 @@ internal class eu07_driver: MonoBehaviour
         if (_fuses.TryGetValue(fed_sanding, out Fuse sanding))
             set(sanding, low.fed(eu07_sim.low_breaker.sanding));
         if (_fuses.TryGetValue(fed_gadgets, out Fuse gadget_feed))
-            // HAULED, OR A FOLLOWER, IT IS OUT ("Now to check if Ciagniona/Multiple unit isolates the Vigilance", the
-            // author, 2026-10-13). Hauled it was, from the start (train_protection_live). A follower it was NOT: a
-            // box in the second locomotive of a pair went on counting with nobody in that cab, and would have
-            // emptied the train's pipe. A locomotive whose desk is held - its cab cut out, or led by another desk,
-            // ours or a foreign one - feeds no vigilance device.
+            // no vigilance feed when hauled or desk held: unmanned follower must not vent the pipe
             set(gadget_feed, low.fed(eu07_sim.low_breaker.control) && power.train_protection_live(low.live) && !_desk_held && !_foreign_led);
         watch_vigilance(low.live);
 
-        // what each breaker holds back of the desk's own switches (the "control" one is the
-        // game's motor fuse, which holds the line contactors out: below)
+        // breakers gate desk switches ("control" = game TM fuse)
         power.converter_switch &= low.breaker[(int) eu07_sim.low_breaker.converter];
         if (_ports.ContainsKey(port_converter_knife))
-            power.converter_knife_open = read(port_converter_knife) > 0.5f;         // (not the desk's switch: pulled under load it arcs - eu07_power_circuit.cs)
-        // The interlock cock: opened, the line breaker goes out at once and the pantographs come
-        // down (below). And the isolators as their handles stand, given to the circuit when it
-        // will take them - with the line breaker out and the wheel at 0, which is also when the
-        // game lets the handles be moved at all.
+            power.converter_knife_open = read(port_converter_knife) > 0.5f;         // arcs if pulled under load
+        // interlock open: breaker out, pantos down; isolators applied when circuit allows
         bool hv_open = _ports.ContainsKey(port_hv_interlock) && read(port_hv_interlock) < 0.5f;
         if (hv_open && !_hv_was_open)
             power.open_fast_breaker();
@@ -905,20 +841,20 @@ internal class eu07_driver: MonoBehaviour
                 _isolators_set = wanted;
             }
         }
-        // (and with the MAIN RESERVOIR cock shut the main compressor has nowhere to deliver: it is not run)
+        // main res cock shut: compressors off
         bool delivery_open = read(port_cock_main_res, 1.0f) > 0.5f;
         power.compressor_switch[0] &= low.breaker[(int) eu07_sim.low_breaker.compressors] && delivery_open;
         power.compressor_switch[1] &= low.breaker[(int) eu07_sim.low_breaker.compressors] && delivery_open;
         power.fans_fed = low.breaker[(int) eu07_sim.low_breaker.fans];
         power.cab_heating_switch = read(port_cab_heating) > 0.5f && low.breaker[(int) eu07_sim.low_breaker.cab_heating];
-        // THE AIR. A prefab without the small compressor's switch has air as it always had.
+        // PANTO AIR (prefab without it: always air)
         bool has_air = _ports.ContainsKey(port_small_compressor) && _ports.ContainsKey(control_panto_air);
         eu07_sim.pantograph_air air = _air;
         if (has_air)
         {
             if (_air_kept < 0.0f)
             {
-                // a save from before this kept nothing: as much as the main reservoir would have given it
+                // nothing saved: from main res
                 float kept = read(control_panto_air);
                 air.bar = kept >= 1.0f ? kept - 1.0f : Mathf.Min(Mathf.Max(power.main_reservoir_bar, 0.0f), eu07_sim.pantograph_air.feed_bar);
                 _air_kept = air.bar;
@@ -928,12 +864,10 @@ internal class eu07_driver: MonoBehaviour
             air.feed_open = read(port_cock_control_air, 1.0f) > 0.5f;
             air.pantographs_open = read(port_cock_panto_air, 1.0f) > 0.5f;
             air.drain_open = read(port_cock_drain) > 0.5f;
-            // the small compressor: on the battery, and only with the line breaker open
+            // small compressor: battery, breaker open only
             air.pump_wanted = read(port_small_compressor) > 0.5f && low.live && !power.fast_breaker_closed;
         }
-        // The pantographs' valves hold only while they are fed: no 110 V, or their breaker out,
-        // and both come down whatever the desk's switches ask. And they want AIR: so much to go
-        // up, less to stay up.
+        // panto valves: 110 V + breaker + air (more to raise than hold)
         int raised = 0;
         foreach ((string ask, string valve) in pantograph_ports)
         {
@@ -967,11 +901,10 @@ internal class eu07_driver: MonoBehaviour
         }
     }
 
-    private double _metres_run = -1.0;        // what the recorder's counter shows; under 0: not yet read from the save
+    private double _metres_run = -1.0;        // odometer; < 0: unread
     private float  _since_attach = 0.0f;
-    private int    _arcs_seen = -1, _flashovers_seen = -1;      // how many of each the circuit had counted when last looked at
-    // The doors: each leaf with the frame it hangs in, its handles as they rest and which way
-    // lowers each one's lever, and where it stood a frame ago.
+    private int    _arcs_seen = -1, _flashovers_seen = -1;      // counts last seen
+    // door: frame, leaf, handles, rest pose, lever direction
     private sealed class door_watch
     {
         public string name = "";
@@ -983,21 +916,13 @@ internal class eu07_driver: MonoBehaviour
     private readonly List<door_watch> _doors = [];
     private GameObject? _doors_of;
 
-    // THE CONTACTORS, SEEN ("contactor animation and overhaul", the author, 2026-10-12: "these contactors just
-    // sitting here after almost melting to bits look a bit off for a deep fried electrical system"). The build
-    // gives each of the cage's 48 an arm and an arc chute under an object called Contactor_<name>, the name the
-    // circuit's own (SL1, IS, SR7, SP3 ...). The arm stands shut or has fallen open as the circuit's contactor
-    // of that name stands, and goes from one to the other in a twentieth of a second - an air cylinder throws
-    // it, a spring throws it back.
-    //
-    // WHAT EACH ONE HAS BEEN THROUGH IS ITS OWN: its soot, if it has had to break a current, and its heat, if it
-    // stood shut while damage was done - eu07_contactor_marks.cs has who gets what, and why. Here they are KEPT
-    // (in sixteen controls nobody can touch, contactorMarks0-15, which the game saves) and SHOWN.
+    // CONTACTORS: 48 x Contactor_<circuit name> (arm + chute); arm moves in 0.05 s
+    // soot + heat marks (eu07_contactor_marks.cs), saved in hidden controls contactorMarks0-15
     private readonly eu07_sim.contactor_marks _marks = new();
     private bool _marks_read = false;
     private static string marks_port(int number) => $"contactorMarks{number}.EXT_IN";
 
-    // every step of the simulation, cage in sight or not: `damage` is what the circuit has just handed the game
+    // every sim step; damage = what the circuit just gave the game
     private void mark_contactors(eu07_sim.power_circuit power, float damage)
     {
         if (!_marks_read)
@@ -1023,19 +948,19 @@ internal class eu07_driver: MonoBehaviour
     private sealed class contactor_watch
     {
         public string name = "";
-        public int index;                           // in eu07_sim.contactor_marks.names: whose marks
+        public int index;                           // contactor_marks.names index
         public Transform? arm;
         public Renderer? chute, arm_shown;
         public float shut, soot_shown = -1.0f, heat_shown = -1.0f;
-        public int stage = -1;                      // which of the build's sooted materials its chute wears
+        public int stage = -1;                      // chute soot material
     }
     private readonly List<contactor_watch> _contactors = [];
     private GameObject? _contactors_of;
     private MaterialPropertyBlock? _tint;
-    // the chute's material at each stage of its sooting, clean first: the build's, kept on a hidden object (ContactorSoot)
+    // soot stage materials, clean first (hidden ContactorSoot)
     private Material[] _soot_stages = [];
     public const float contactor_opens = 24.0f, contactor_seconds = 0.05f;
-    // heat on the cement: browned. On the arm's copper: red-brown, purple-blue, grey scale. Soot on the contact: black.
+    // heat: chute browned, copper tempered; soot: contact black
     private static readonly Color chute_toasted = new(0.80f, 0.66f, 0.48f);
     private static readonly Color[] copper_by_heat = [new(0.47f, 0.27f, 0.18f), new(0.36f, 0.16f, 0.12f), new(0.23f, 0.17f, 0.31f), new(0.11f, 0.11f, 0.12f)];
     private static readonly Color contact_burnt = new(0.045f, 0.042f, 0.040f);
@@ -1071,7 +996,7 @@ internal class eu07_driver: MonoBehaviour
                     _contactors.Add(new contactor_watch { name = name, index = index, arm = arm, chute = chute != null ? chute.GetComponent<Renderer>() : null,
                         arm_shown = arm != null ? arm.GetComponent<Renderer>() : null, shut = power.contactor_locations[name].is_contactor_on(name) ? 1.0f : 0.0f });
                 }
-                Main.release_log($"EU07 {_car?.ID}: {_contactors.Count} contactors found in the cage to move, {_soot_stages.Length} stages of soot for their chutes");
+                Main.log($"EU07 {_car?.ID}: {_contactors.Count} contactors found in the cage to move, {_soot_stages.Length} stages of soot for their chutes");
             }
         }
         if (_contactors.Count == 0)
@@ -1091,7 +1016,7 @@ internal class eu07_driver: MonoBehaviour
             one.heat_shown = hot;
             if (one.chute != null)
             {
-                // the chute: the painted stage its soot has come to, browned over by its heat
+                // chute: soot stage + heat tint
                 int stage = _soot_stages.Length > 1 ? Mathf.Clamp(Mathf.RoundToInt(black * (_soot_stages.Length - 1)), 0, _soot_stages.Length - 1) : -1;
                 if (stage >= 0 && stage != one.stage)
                 {
@@ -1103,7 +1028,7 @@ internal class eu07_driver: MonoBehaviour
             }
             if (one.arm_shown != null)
             {
-                // the arm: its bar by its heat; its contact (the second material) by both, the soot winning
+                // arm: bar by heat; contact (2nd material) by heat + soot
                 Color bar = heated_copper(hot);
                 _tint.SetColor("_Color", bar);
                 one.arm_shown.SetPropertyBlock(_tint, 0);
@@ -1116,18 +1041,17 @@ internal class eu07_driver: MonoBehaviour
         }
     }
     public const float handle_press_degrees = 28.0f;
-    // The wipers: each one's controller, the control of its valve, and the speed it was last given.
+    // wipers: controller, valve control, last speed
     private readonly List<(DV.Rain.WiperController wiper, string port)> _wipers = [];
     private readonly List<int> _wiper_speeds = [];
-    // The motors' heat: the game's own reservoir for it (its lamp, its wear and its blown fuse go
-    // by that), how much heat a degree of it is, and whether what the save had has been read.
+    // motor heat in the game's reservoir (drives its lamp, wear, fuse)
     public const string port_motor_celsius = "tmHeat.TEMPERATURE";
     public const string fuse_motors        = "fusebox.TM_POWER";
     private float  _reservoir_capacity = 500.0f;
     private bool   _motor_heat_read = false;
-    private float  _battery_kept = -1.0f;     // what the save has of the battery's charge; under 0: not yet read from it
-    private const float game_reservoir_limit_bar = 8.0f;      // over the atmosphere: the most the game holds in a main reservoir
-    private float  _compressor_rate = 80.0f;  // bar litres a second from both compressors: the game's own compressor's figure, read from it
+    private float  _battery_kept = -1.0f;     // saved charge; < 0: unread
+    private const float game_reservoir_limit_bar = 8.0f;      // game clamps main res here (gauge)
+    private float  _compressor_rate = 80.0f;  // bar*l/s, both compressors, from the game's
 
     private float read(string id, float otherwise = 0.0f) => _ports.TryGetValue(id, out Port port) ? port.Value : otherwise;
 
@@ -1139,7 +1063,7 @@ internal class eu07_driver: MonoBehaviour
 
     private void write(string id, bool lit) => write(id, lit ? 1.0f : 0.0f);
 
-    // ---- for mod/eu07_debug.cs: the same handles, by name ---------------------------------
+    // ---- debug commands (mod/eu07_debug.cs) ----
     public string command(string[] words)
     {
         eu07_sim.power_circuit? power = _power;
@@ -1156,7 +1080,7 @@ internal class eu07_driver: MonoBehaviour
             case "odometer" : _metres_run = Math.Max(0.0, number) * 1000.0; write(control_odometer, number); return $"counter at {_metres_run / 1000.0:F2} km";
             case "marks"    :
             {
-                // marks <a contactor's name | in | all> <soot 0-1> <heat 0-1>: what a contactor has been through, put on by hand ("in": those standing shut now)
+                // marks <name | in | all> <soot 0-1> <heat 0-1>; "in" = contactors now closed
                 if (words.Length != 4 || !float.TryParse(words[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float soot_given)
                                       || !float.TryParse(words[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float heat_given))
                     return "marks <name | in | all> <soot 0-1> <heat 0-1>";
@@ -1173,14 +1097,14 @@ internal class eu07_driver: MonoBehaviour
             }
             case "grids"    : power.grid_celsius = Mathf.Clamp(number, eu07_sim.power_circuit.ambient_celsius, eu07_sim.power_circuit.grids_melt_celsius); return $"the resistor grids at {power.grid_celsius:F0} C";
             case "health"   :
-                // health <0-1>: the game's electrical drivetrain pool, to put back what a test of the above took
+                // health <0-1>: sets the game's electrical drivetrain health
                 if (_damage == null || _damage.electricalPT == null || words.Length != 2)
                     return "health <0-1>, with a damage controller";
                 _damage.electricalPT.SetCurrentHealthPercentage(Mathf.Clamp01(number));
                 return $"drivetrain health {_damage.electricalPT.HealthPercentage:F3}";
             case "battery"  : power.battery_wanted = number > 0.5f; return $"battery switch {power.battery_wanted} (a desk with the switch overrules this)";
             case "control"  :
-                // control <object name> <0-1>: a handle of the loaded interior that has no port (a door, the flap)
+                // control <object> <0-1>: interior handle with no port (door, flap)
                 if (words.Length != 3 || _car.interior == null)
                     return "control <object name> <0-1>, with the interior loaded";
                 foreach (DV.CabControls.ControlImplBase handle in _car.interior.GetComponentsInChildren<DV.CabControls.ControlImplBase>(true))
@@ -1194,8 +1118,7 @@ internal class eu07_driver: MonoBehaviour
                 return "no such handle";
             case "ray"      :
             {
-                // ray <from x y z> <to x y z>, in the vehicle's own frame: what the game's own pointer
-                // would take hold of along that line - for checking that a handle can be reached
+                // ray <from xyz> <to xyz>, car frame: what the pointer grabs (reachability check)
                 if (words.Length != 7)
                     return "ray <from x y z> <to x y z>";
                 float[] at = words.Skip(1).Select(word => float.Parse(word, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
@@ -1212,8 +1135,7 @@ internal class eu07_driver: MonoBehaviour
             case "charge"   : power.battery_joules = Mathf.Clamp01(number) * eu07_sim.power_circuit.battery_kWh * 3.6e+6f; return $"battery at {power.battery_charge * 100.0f:F0} %";
             case "audio"    : if (_audio == null) return "no audio"; _audio.muted = number < 0.5f; return $"our sounds muted {_audio.muted}";
             case "board"    :
-                // board: the player into cab A (board <metres>: that far to the right of the
-                // locomotive, on the ground) - for listening runs with nobody at the keyboard.
+                // board: player into cab A; board <m>: on the ground, m to the right
                 if (words.Length == 2)
                     PlayerManager.TeleportPlayer(_car.transform.TransformPoint(number, 0.3f, 0.0f), _car.transform.rotation, null, useRotation: true);
                 else
@@ -1223,8 +1145,7 @@ internal class eu07_driver: MonoBehaviour
             case "handbrake": _car.brakeSystem.SetHandbrakePosition(number, forced: true); return $"handbrake {number}";
             case "paint"    :
             {
-                // paint <theme>: what a can of the game's would do (DVRT, DVRT_New, Null, Relic, Relic_Rusty), with no sprayer
-                // (paint <theme> inside: the inside's paint)
+                // paint <theme> [inside]: DVRT, DVRT_New, Null, Relic, Relic_Rusty
                 DV.Customization.Paint.TrainCarPaint? outside = words.Length == 3 && words[2] == "inside" ? _car.PaintInterior : _car.PaintExterior;
                 if (outside == null)
                     return "this car has no paint to change";
@@ -1240,9 +1161,7 @@ internal class eu07_driver: MonoBehaviour
                 fuse.ChangeState(number > 0.5f);
                 return $"{words[1]} = {fuse.State}";
             case "scroll"   :
-                // scroll <control object on the desk> <taps, signed>: the very call a key tap or a
-                // tick of the mouse wheel makes, at a held key's rhythm - so that "do the throttle
-                // keys step the wheel" can be answered with nobody at the keyboard.
+                // scroll <control> <signed taps>: same call as a key tap / wheel tick, key-repeat timing
                 if (words.Length != 3)
                     return "scroll <control> <taps>";
                 GameObject? desk = _car.loadedExternalInteractables;
@@ -1256,9 +1175,7 @@ internal class eu07_driver: MonoBehaviour
                 return $"scrolling {words[1]} by {(int) number}";
             case "stand"    :
             {
-                // stand <right> <up> <forward> <yaw>: the player at that place in the locomotive's own
-                // frame (metres from its middle, from the rail), turned that many degrees from its
-                // nose - so that look.py --player can photograph anything, from anywhere.
+                // stand <right> <up> <forward> <yaw>: player at that spot, car frame (m from middle, from rail)
                 if (words.Length != 5)
                     return "stand <right> <up> <forward> <yaw>";
                 float[] place = words.Skip(1).Select(word => float.Parse(word, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
@@ -1269,7 +1186,7 @@ internal class eu07_driver: MonoBehaviour
             }
             case "set"      :
             {
-                // set <control object on the desk> <0..1>: puts a control there outright (a door, say)
+                // set <control> <0..1>: set a desk control directly
                 if (words.Length != 3)
                     return "set <control> <0..1>";
                 GameObject? parts = _car.loadedExternalInteractables;
@@ -1297,7 +1214,7 @@ internal class eu07_driver: MonoBehaviour
         for (int index = 0; index < Mathf.Abs(count); ++index)
         {
             control.Scroll(count > 0 ? ScrollAction.ScrollUp : ScrollAction.ScrollDown);
-            yield return new WaitForSeconds(index == 0 ? 0.25f : 0.125f);      // the keyboard's own delays
+            yield return new WaitForSeconds(index == 0 ? 0.25f : 0.125f);      // key-repeat delays
         }
         yield return new WaitForSeconds(0.3f);
         control.Scroll(ScrollAction.Release);
@@ -1372,13 +1289,10 @@ internal class eu07_driver: MonoBehaviour
         if (power == null || _car == null)
             return;
 
+        cab_step();
         power.line_volts         = read(port_supply_volts);
-        // The game's pressures have the atmosphere in them: 1.0 is empty. And the game will not
-        // hold more than 8 bar in a main reservoir (BrakeSystem.SimulateCompressor clamps it), which
-        // is exactly where our pressure switch cuts out - and the figure it shows only creeps up
-        // toward that, so the switch never saw 8 and the compressors ran on for good ("i can
-        // still hear the compressor, even under wire and charged to 8bar", the author,
-        // 2026-10-11). Within 0.03 bar of the game's limit is AT it.
+        // game pressures are absolute (1.0 = empty); game clamps main res at 8 bar and only
+        // creeps toward it: within 0.03 counts as full, else compressors never cut out
         float reservoir = _car.brakeSystem != null ? _car.brakeSystem.mainReservoirPressure - 1.0f : 0.0f;
         power.main_reservoir_bar = reservoir >= game_reservoir_limit_bar - 0.03f ? Mathf.Max(reservoir, eu07_sim.power_circuit.compressor_cut_out_bar) : reservoir;
 
@@ -1387,9 +1301,7 @@ internal class eu07_driver: MonoBehaviour
         power.set_controller(Mathf.RoundToInt(Mathf.Clamp01(read(port_throttle)) * (eu07_sim.controller_positions - 1)));
         if (_desk_v2)
         {
-            // PLW and PLP are held: levels. The keypad's 0 holds PLW as well.
-            // (and a follower's with its leader's: the leader's device empties the pipe of the whole train, and the
-            // follower must not go on pulling against the brakes)
+            // PLW/PLP held = levels; keypad 0 = PLW; follower also cut out by leader's vigilance
             power.line_contactor_cutout = _line_off_key || read(port_line_off) > 0.5f || _vigilance_vents || (_leader != null && _leader._vigilance_vents);
             power.hauled = read(port_hauled) > 0.5f;
             slip_button = read(port_slip_button) > 0.5f;
@@ -1410,7 +1322,7 @@ internal class eu07_driver: MonoBehaviour
         if (_ports.ContainsKey(port_heating_switch))
             power.heating_switch = read(port_heating_switch) > 0.5f;
         multiple_unit_step();
-        // what the others are told (see port_said_celsius)
+        // reported to other units (see port_said_celsius)
         bool asked = power.contactors.direction != 0 && read(port_throttle) > 0.005f && !power.hauled;
         _refused_for = asked && !power.may_take_power ? _refused_for + Time.fixedDeltaTime : 0.0f;
         float said_celsius = read(port_motor_celsius, power.motor_celsius);
@@ -1425,7 +1337,7 @@ internal class eu07_driver: MonoBehaviour
         }
         if (_foreign_led)
         {
-            // the throttle is HOW MUCH is wanted, not a notch: the wheel and the field lever are worked for it
+            // foreign throttle = demand, not a notch: auto-notch wheel and field
             _auto.step(Time.fixedDeltaTime, Mathf.Clamp01(read(port_throttle)), power.pair_amps_12, power.pair_amps_34, power.feed_volts,
                        power.contactors.position, power.contactors.field, power.may_take_power, power.slip_detected, power.grid_celsius);
             power.set_controller(_auto.wheel);
@@ -1434,23 +1346,20 @@ internal class eu07_driver: MonoBehaviour
         else
         {
             _auto.reset();
-            // cut out and led by nobody: the wheel is not this desk's to turn, and nobody else turns it - no power,
-            // wherever the wheel was left when the switch went up
+            // cut out, no leader: no power
             if (_cab_cut_out && _leader == null)
                 power.set_controller(0);
         }
         low_voltage_step(power, Time.fixedDeltaTime);
-        // The game's fuse for the traction motors - its switch on the fuse plate, and what the
-        // game throws out when the motors overheat - holds the line contactors out. It did
-        // nothing: the fuse was his motors', which are off the wheels.
+        // game's TM fuse (fuse plate switch, overheat trip) holds line contactors out
         if (_fuses.TryGetValue(fuse_motors, out Fuse motors_fuse) && !motors_fuse.State)
             power.line_contactor_cutout = true;
         if (!_motor_heat_read && _ports.ContainsKey(port_motor_celsius))
         {
-            power.motor_celsius = Mathf.Max(eu07_sim.power_circuit.ambient_celsius, read(port_motor_celsius));     // as the save had it
+            power.motor_celsius = Mathf.Max(eu07_sim.power_circuit.ambient_celsius, read(port_motor_celsius));     // from the save
             _motor_heat_read = true;
         }
-        // The wipers are air motors: each goes as its valve stands, and not at all under 2 bar.
+        // air-driven wipers: speed by valve, stopped under 2 bar
         for (int index = 0; index < _wipers.Count; ++index)
         {
             (DV.Rain.WiperController wiper, string control) = _wipers[index];
@@ -1471,16 +1380,14 @@ internal class eu07_driver: MonoBehaviour
             power.battery_joules = _battery_kept * eu07_sim.power_circuit.battery_kWh * 3.6e+6f;
         }
 
-        // The presses, from the v2 buttons and the keypad alike. OFF after ON, so that both
-        // at once leave the breaker open.
+        // presses (v2 buttons, keypad); OFF after ON so both at once leave breaker open
         if (take(ref _want_close))
             power.close_fast_breaker();
         if (take(ref _want_open))
             power.open_fast_breaker();
         if (take(ref _want_reset))
         {
-            // said in the log, with what stood in its way: a press that did nothing left no trace
-            // ("i cant reset motor ground fault when on battery", the author, 2026-10-11)
+            // log the reset and what blocked it
             bool was = power.overcurrent_tripped || power.earth_fault_tripped;
             bool clear = power.reset_relays();
             if (was)
@@ -1492,20 +1399,12 @@ internal class eu07_driver: MonoBehaviour
 
         power.simulate(Time.fixedDeltaTime);
 
-        // THE AIR. The railcar's own compressor makes it, and that one knows only the bus bar:
-        // it ran whenever there were volts on the wire, whatever our switch, relay and pressure
-        // switch said, and not at all on the battery, where ours could be heard working and
-        // the reservoir stayed where it was ("the main res isnt recharging with the compressor
-        // audibly working", the author, 2026-10-11, on the battery with a train on). The brake
-        // system takes its filling rate from a field the game's compressor writes only when
-        // its own output changes; so the rate is written here every step, and is OURS: the
-        // game's figure for the whole, half of it for each of the two compressors that runs.
+        // MAIN AIR: game compressor follows only the bus bar, so its rate is overwritten every step;
+        // half the game's rate per running compressor
         if (_car.brakeSystem != null)
             _car.brakeSystem.compressorProductionRate = _compressor_rate * 0.5f * ((power.compressor_running[0] ? 1.0f : 0.0f) + (power.compressor_running[1] ? 1.0f : 0.0f));
 
-        // Damage the simulation has run up (plugging, a flashover) goes on the game's electrical
-        // drivetrain pool, scaled by the player's damage setting as the game's own is; and that
-        // pool's health comes back, for what it does to the motors and the earth-fault relay.
+        // sim damage -> game electrical drivetrain pool (x damage setting); health read back
         if (_damage == null)
             _damage = _car.GetComponent<DV.Damage.DamageController>();
         float damage = power.take_damage();
@@ -1517,28 +1416,15 @@ internal class eu07_driver: MonoBehaviour
         }
         mark_contactors(power, damage);
 
-        // Running resistance. The game gives a vehicle rolling resistance only (2 N a kN of weight:
-        // 1.6 kN for this one, whatever the speed), and alone she coasted from 108 km/h losing
-        // 0.015-0.035 m/s2 ("surprisingly, solo she survives a long way", the author,
-        // 2026-10-10; debug/audio_trace.csv). A locomotive of this size and bluntness loses
-        // about 0.08 at 100 km/h: the air (some 4 kN there, with the square of the speed) and
-        // the flanges, bearings and gears (about 1 kN, with the speed) - the B and C of a
-        // Davis formula for a four-axle 83 t electric locomotive. Put on as torque against the
-        // wheels' turning, which is where the game takes force from this vehicle.
+        // RUNNING RESISTANCE: game has rolling only (2 N/kN, ~1.6 kN); add Davis B+C terms,
+        // 4-axle 83 t loco (~0.08 m/s2 at 100 km/h), as torque against the wheels
         float forward = _car.GetForwardSpeed(), kmh = Mathf.Abs(forward) * 3.6f;
         running_drag_newtons = (drag_newtons_per_kmh * kmh + drag_newtons_per_kmh2 * kmh * kmh) * Mathf.Clamp01(kmh / 2.0f);
         write(port_torque       , power.wheel_torque - Mathf.Sign(forward) * running_drag_newtons * wheel_radius_metres);
         write(port_line_current , power.line_current);
-        // The lights: the game shows ONE setup an end, by number; the desk has a switch a lamp.
-        // The vehicle has a setup for every way six switches can stand (eu07_build.cs,
-        // make_lights): left 1, top 2, right 4, red left 8, red right 16, and not dimmed 32, 64,
-        // 128 for the left, top and right white.
-        // LED BY A FOREIGN DESK, her lamps are that desk's to set ("the MU light controller in our loco doesnt listen
-        // to given commands", the author, 2026-10-12). The game sends its selector's place, one of six -
-        // 0 and 0.2 red, 0.4 off, 0.6, 0.8 and 1 white, weak to full - for each end, to two ports that
-        // hold nothing else (eu07_build.cs, trainLightsFront); here that is made lamps: both reds; none;
-        // the two lower whites dimmed; all three dimmed; all three full. Her own switches are then
-        // passed over, and are hers again when the leader is gone.
+        // LIGHTS: one game setup per end, by number (eu07_build.cs, make_lights): bits left 1, top 2,
+        // right 4, red L 8, red R 16; not-dimmed L/T/R 32/64/128
+        // foreign-led: leader's selector (0,0.2 red; 0.4 off; 0.6/0.8/1 white dim->full) overrides own switches
         foreach ((string cab, string control) in new[] { ("A", "headlightDecoder.FRONT_HEADLIGHTS_EXT_IN"), ("B", "headlightDecoder.REAR_HEADLIGHTS_EXT_IN") })
         {
             if (!_ports.ContainsKey($"lightLeft{cab}.EXT_IN"))
@@ -1569,12 +1455,8 @@ internal class eu07_driver: MonoBehaviour
             if (Mathf.Abs(read(control) - wanted) > 0.001f)
                 write(control, wanted);
         }
-        // The speed recorder ("wanna do the Km counter and inbuilt clock next?", the author,
-        // 2026-10-11). Its clock goes by the GAME's time, asked of the game's own clocks'
-        // keeper. Its counter counts what this locomotive has run: six drums, the lowest for
-        // hundreds of metres and turning all the while, each of the others standing on its
-        // figure and turning on to the next while every drum under it goes from 9 to 0. The
-        // kilometres are written to a control the game saves, and read back from it once.
+        // SPEED RECORDER: clock on game time; odometer 6 drums, lowest = 100 m,
+        // others roll over as the drums below go 9 -> 0; km kept in a saved control
         DV.TimeKeeping.WorldClockController keeper = DV.Utils.SingletonBehaviour<DV.TimeKeeping.WorldClockController>.Instance;
         if (keeper != null)
         {
@@ -1606,8 +1488,7 @@ internal class eu07_driver: MonoBehaviour
         write(port_fan_speed    , power.fan_speed);
         write(port_converter    , power.converter_speed);
         write(port_resistor_heat, power.resistor_heat);
-        // NOT the motors' losses any more but what makes the game's temperature for them follow
-        // ours, half a second behind: so much heat as the difference is worth.
+        // heat that makes the game's motor temp follow ours, 0.5 s lag
         write(port_motor_heat   , (power.motor_celsius - read(port_motor_celsius, power.motor_celsius)) * _reservoir_capacity / 0.5f);
         light(lamp_fast_breaker , power.fast_breaker_closed);
         light(lamp_line_open    , !power.line_contactors_closed);
@@ -1620,16 +1501,8 @@ internal class eu07_driver: MonoBehaviour
         light(lamp_auxiliary    , power.converter_tripped || power.heating_tripped);
         light(lamp_compressor   , power.compressor_tripped);
         light(lamp_heating      , power.heating_on);
-        // ARCS. "do the arcing, but if i remember correctly, the game already does arcing ... tm
-        // arcing is from the main game" (the author, 2026-10-11): the game shows a dead traction
-        // motor sparking, and that effect is what is borrowed - the vehicle's own
-        // DeadTractionMotorsController carries the sparks, with their sound. They stood at the
-        // motors for an hour: "maybe lets relocate em to the cabinet, since there are no
-        // contactors on the motors visibly". So when our protection breaks a heavy current
-        // (the circuit counts those) the sparks are in a HIGH-VOLTAGE CABINET, behind the two
-        // windows next to a cab where such arcs are seen from the lineside (cabinet_arc), with
-        // a flickering light of ours, the longer the more amperes were broken. A commutator's flashover IS at a motor, and
-        // stays there: one motor, three seconds.
+        // ARCS: borrowed game effect (DeadTractionMotorsController sparks + sound)
+        // heavy current broken -> HV cabinet windows (cabinet_arc); flashover -> one motor, 3 s
         if (_arcs_seen < 0)
         {
             _arcs_seen = power.arcs;
@@ -1639,14 +1512,7 @@ internal class eu07_driver: MonoBehaviour
         {
             _arcs_seen = power.arcs;
             float much = Mathf.Clamp01((power.arc_amps - eu07_sim.power_circuit.arc_from_amps) / 600.0f);
-            // The game's effect is a looping one whose bright flash only comes 0.3 s in, and whose
-            // sparks fly from 1.5 m either side of the axle, at wheel height: 0.3 to 1.2 s of it
-            // was over before it could be seen ("didnt see any. where do they fire from?").
-            // "off it pops. but probably too fast. id keep the instant flash" (the same, seeing it):
-            // it lasted 1.2 to 2.8 s. Now 2.5 to 5 s, the flash at its start as it was.
-            // A FLASH, not an arc that burns: "the arcing shouldnt take couple of seconds. its an
-            // instant flash once the contactors open, not a long welding like arc" (the author,
-            // 2026-10-11, of one I had drawn out to five seconds). A quarter to under half a second.
+            // instant flash, 0.25-0.45 s by amps broken
             cabinet_arc(0.25f + 0.20f * much, much, power.arc_at_breaker, $"{power.arc_amps:F0} A broken");
         }
         if (power.flashovers != _flashovers_seen)
@@ -1666,15 +1532,10 @@ internal class eu07_driver: MonoBehaviour
         }
     }
 
-    // The v1 desk, as it was: switches all.
+    // v1 desk: switches only
     private void read_desk_v1(eu07_sim.power_circuit power)
     {
-        // The desk. The fast breaker's switch is read for its LEVEL: while it is on, a
-        // breaker that has fallen out goes back in by itself as soon as it may (volts back
-        // on the wire, no relay holding it). The real desk has two impulse buttons, and a
-        // breaker that fell out stays out; but a switch that sits at "on" over an open
-        // breaker and does nothing cost the author a minute of flipping the wrong ones
-        // (2026-10-10). The other switches are read for their edges.
+        // fast breaker switch read as a level (recloses when it may); others by edges
         float breaker = read(port_fast_breaker, _breaker_switch), reset = read(port_relay_reset, _reset_switch);
         if (_ports.ContainsKey(port_fast_breaker))
         {
@@ -1690,10 +1551,7 @@ internal class eu07_driver: MonoBehaviour
         }
         _breaker_switch = breaker;
         _reset_switch   = reset;
-        // PLW is a push-button and this is a toggle. Read as a level it had a position that
-        // left the locomotive dead, and the author found it three times (2026-10-10). So
-        // each flip, either way, is one press: the contactors fall out, and come back
-        // when the wheel has been to 0, as after the real button.
+        // PLW on a toggle: each flip = one press; contactors back after wheel to 0
         float line_off = read(port_line_off, _line_off_switch);
         if (_line_off_switch >= 0.0f && (line_off > 0.5f) != (_line_off_switch > 0.5f))
             _line_off_press = 0.3f;
@@ -1702,26 +1560,18 @@ internal class eu07_driver: MonoBehaviour
         power.line_contactor_cutout = _line_off_key || _line_off_press > 0.0f;
     }
 
-    // Where the arcs are, in the vehicle (x right, y over the rail, z toward cab A). "ive seen arcing
-    // from locos in the first two windows. that general area are the contactors, so they should
-    // be there" (the author, 2026-10-11, with a picture of the side): behind the two windows next
-    // to a cab stands that end's high-voltage cabinet, and the model's contactors on its lower
-    // shelf come at 0.27 m steps along it (model/eu07_blockout.py) - one of them behind each
-    // window. So the line contactors' arcs are at those two, in cab A's cabinet; the main
-    // breaker's at the breaker itself, at the head of cab B's cabinet, and at the contactor
-    // behind the window next to it.
+    // arc spots, car frame (x right, y above rail, z to cab A), behind the HV cabinet windows:
+    // line contactors in cab A's cabinet; main breaker at the head of cab B's
     private static readonly Vector3[] contactor_chutes = [new(-0.575f, 2.95f, 2.29f), new(-0.575f, 2.95f, 4.72f)];
     private static readonly Vector3[] breaker_chutes   = [new(0.57f, 3.00f, -1.75f), new(0.575f, 2.95f, -2.44f)];
 
-    // An arc in a high-voltage cabinet: the game's sparks, its two emitters (made for a bogie, a
-    // metre and a half either side of the middle) put at the two places and made smaller, and at
-    // each a blue-white light of ours that flickers while they last.
+    // HV cabinet arc: game's 2 spark emitters moved + scaled down, plus a blue-white flash at each
     private void cabinet_arc(float seconds, float much, bool breaker, string why)
     {
         if (_car == null)
             return;
         Vector3[] at = breaker ? breaker_chutes : contactor_chutes;
-        // (the line contactors' own chutes, when the cage's fittings are there to say where they stand)
+        // SL1/SL3 chutes when the cage is loaded
         Vector3[] line = _contactors.Where(one => (one.name == "SL1" || one.name == "SL3") && one.chute != null)
                                     .Select(one => _car.transform.InverseTransformPoint(one.chute!.bounds.center)).ToArray();
         if (!breaker && line.Length == 2)
@@ -1738,7 +1588,7 @@ internal class eu07_driver: MonoBehaviour
             sparks.transform.localRotation = Quaternion.identity;
             foreach (Transform emitter in sparks.transform)
             {
-                if (!emitter.name.StartsWith("ElectricSparks"))        // its two emitters; the third child is its sound
+                if (!emitter.name.StartsWith("ElectricSparks"))        // 2 emitters; 3rd child = sound
                     continue;
                 emitter.position = _car.transform.TransformPoint(at[Math.Min(emitters, at.Length - 1)]);
                 emitter.localScale = Vector3.one * 0.6f;
@@ -1759,13 +1609,12 @@ internal class eu07_driver: MonoBehaviour
             glow.shadows = LightShadows.None;
             StartCoroutine(flash(glow, seconds, 5.0f + 6.0f * much));
         }
-        // the game's sparks begin a moment after they are made: left a little longer than the light, for the spray to be seen
+        // sparks start late: outlive the light a bit
         Destroy(place, seconds + 0.45f);
         Main.release_log($"EU07 {_car.ID}: an arc ({why}) in the {(breaker ? "main breaker" : "line contactors")}: a flash of {seconds:F2} s at two places, the game's sparks ({emitters} emitters) after it");
     }
 
-    // One flash: at its brightest at once, held for a twentieth of a second, then gone smoothly
-    // by the end of its time. No flicker - that was what made it a welder's arc.
+    // flash: full at once, 0.05 s hold, quadratic fade; no flicker
     private static IEnumerator flash(Light glow, float seconds, float strength)
     {
         for (float time = 0.0f; time < seconds && glow != null; time += Time.deltaTime)
@@ -1778,7 +1627,7 @@ internal class eu07_driver: MonoBehaviour
             glow.intensity = 0.0f;
     }
 
-    // The game's own sparks at the traction motors, for so many seconds: at every motor, or at one.
+    // game's sparks at all motors, or one random motor
     private void motor_sparks(float seconds, bool every, string why)
     {
         DV.Simulation.Controllers.DeadTractionMotorsController? dead = _car != null ? _car.GetComponentInChildren<DV.Simulation.Controllers.DeadTractionMotorsController>(true) : null;
@@ -1802,30 +1651,21 @@ internal class eu07_driver: MonoBehaviour
         Main.release_log($"EU07 {_car?.ID}: an arc ({why}): the game's sparks at {shown} motor(s) for {seconds:F1} s");
     }
 
-    // THE DOORS' HANDLES ("a nice detail would be to see the handle move down as part of the
-    // opening and closing animation", the author, 2026-10-11; their sound is the game's own,
-    // put on the hinge by the build). The doors come and go with the cab's fittings, so they are looked for
-    // whenever those change: every object called Door... with a leaf C_Door... and, on the leaf,
-    // the turning parts the build calls DoorHandle. A handle is down while the latch is in the
-    // frame's way - the leaf between 1 and 9 degrees open - and up otherwise: it dips as the
-    // door is pulled open and again as it comes home.
-    // THE OUTSIDE DOORS WEAR THE BODY'S PAINT. The game's paint cans repaint what is in the
-    // vehicle's own prefab; the hinged doors come with the cab's fittings, in another, where
-    // the cans cannot be told of them. So whenever the body's painted material is not the one
-    // the doors were last given - a can was used, or the doors have just come - they get it.
+    // DOOR HANDLES: Door* frame, C_Door* leaf, DoorHandle parts; re-found when fittings reload.
+    // handle dips while leaf is ~1-9 deg open (latch passing the frame)
+    // OUTSIDE DOORS: separate prefab, paint cans miss it -> copy the body's material
     private const string painted_parts = "Parts_outside", painted_material = "EU07_paint_eu07_ext_b";
     private Renderer? _painted_body;
     private Renderer[] _painted_doors = Array.Empty<Renderer>();
     private Material? _doors_painted_as;
-    // THE DESK'S PAINTED SURFACES WEAR THE INSIDE'S PAINT, likewise: the build's "Skin..." pieces are
-    // given what the vehicle's inside theme has in place of the material they were built with.
+    // DESK Skin* pieces: interior theme's substitute material
     private Renderer[] _skins = Array.Empty<Renderer>();
     private Material[] _skins_built = Array.Empty<Material>();
     private DV.Customization.Paint.PaintTheme? _skins_painted_as;
 
     private void watch_doors()
     {
-        // (the cab's fittings as the game has them just now: the real ones, or - with nobody near - its stand-ins for them)
+        // real fittings, or the dummy stand-ins when nobody is near
         GameObject? parts = _car == null ? null : _car.loadedExternalInteractables != null ? _car.loadedExternalInteractables : _car.loadedDummyExternalInteractables;
         if (parts != _doors_of)
         {
@@ -1872,7 +1712,7 @@ internal class eu07_driver: MonoBehaviour
                     door_watch door = new() { name = frame.name, frame = frame, leaf = leaf };
                     door.handles = leaf.GetComponentsInChildren<Transform>(true).Where(part => part.name == "DoorHandle").ToArray();
                     door.rest = door.handles.Select(handle => handle.localRotation).ToArray();
-                    // a lever lying toward its own +x is lowered by turning it backward about z; one turned over to lie the other way, forward
+                    // lever toward +x lowers with -z turn; mirrored lever (scale.x < 0) with +z
                     door.lowers = door.handles.Select(handle => handle.Find("Lever") is Transform lever && lever.localScale.x < 0.0f ? 1.0f : -1.0f).ToArray();
                     _doors.Add(door);
                 }
@@ -1902,17 +1742,8 @@ internal class eu07_driver: MonoBehaviour
         return ((key.modifiers & 1) == 0 || control) && ((key.modifiers & 2) == 0 || shift) && ((key.modifiers & 4) == 0 || alt);
     }
 
-    // THE CAB STAYS ON THE BODY ("locos and cars for some reason oscillate back and fourth, detaching the body from
-    // the functioning model", the author, 2026-10-14, with the cab's cocks standing off their pipes). Read in the
-    // game: a car's interior - the cab, our desk, cupboards and cocks with it - is not a child of the car; the game
-    // puts it where the car is every LateUpdate, but only while it counts the car as MOVING, and a car that has
-    // stayed within 2 mm for a second it counts as stationary and stops looking at. Measured the same day (debug
-    // hook "watch", a braked train of ten loaded tank cars standing): every car rocked, 0.4 to 4 times a second,
-    // and the train crept 14 cm in two minutes - no car still long enough for the game to freeze the train, each
-    // still long enough, now and then, to be counted stationary. This locomotive was counted stationary 88 % of
-    // the time, its interior left up to 17 mm behind. So on one of ours the interior is put back on the body every
-    // frame the game is not doing it itself. (Why a braked train rocks at all is the game's physics, and is not
-    // touched here.)
+    // CAB ON THE BODY: DV syncs the interior only while the car counts as moving (moved >2 mm within 1 s);
+    // standing cars still rock, so the interior lags up to ~17 mm -> sync it ourselves
     private TrainCarInteriorPhysics? _interior_physics;
 
     void LateUpdate()
@@ -1934,15 +1765,11 @@ internal class eu07_driver: MonoBehaviour
             watch_contactors(power);
         if (power != null && _car != null)
         {
-            // the sounds, whether or not anybody is aboard
+            // sounds, aboard or not
             _audio ??= new eu07_audio(_car, System.IO.Path.Combine(eu07_mod.folder, "audio"));
-            // The horn: how far its lever stands from the middle (the railcar's own horn gives
-            // that, less its fuse), which way (under a half the low tone, over it the high), and
-            // air to blow it - it fades out under 3 bar. Not in the first seconds: the
-            // control comes up from 0 to its middle, which would be a blast at every load.
+            // HORN: lever < 0.5 low tone, > 0.5 high; fades under 3 bar; muted 3 s after load
             _since_attach += Time.deltaTime;
-            // And not for the first sixth of the lever's travel: let go, it comes to rest a hair
-            // off its middle (0.509 seen), which was a horn sounding faintly for good.
+            // dead zone: released lever rests slightly off centre
             float lever = read("hornControl.CONTROL", 0.5f), travel = Mathf.Clamp01((read("horn.HORN") - 0.15f) / 0.85f);
             float blown = _since_attach > 3.0f ? travel * Mathf.Clamp01(power.main_reservoir_bar / 3.0f) : 0.0f;
             _audio.horn_low  = lever < 0.5f ? blown : 0.0f;
@@ -1954,25 +1781,18 @@ internal class eu07_driver: MonoBehaviour
                 [read("pantograph.PANTOGRAPH_IN_CONTACT") > 0.5f, read("pantograph2.PANTOGRAPH_IN_CONTACT") > 0.5f],
                 [read("pantograph.PANTOGRAPH_RAISE_NORMALIZED"), read("pantograph2.PANTOGRAPH_RAISE_NORMALIZED")]);
         }
-        // the vigilance key (eu07_mod.settings: the mod manager's page): the yellow button's own press, for whoever is aboard
-        // (Not the mod manager's own KeyBinding.Down(): that wants the modifier keys to stand EXACTLY as the binding
-        // says, so a binding of Left Shift alone - the author's - can never be down: Shift is held, and the binding
-        // says no Shift. "our vigillance ack button doesnt actually act when key pressed". Here the key going down
-        // is the press, with whatever modifiers the binding names held, and any others let be.)
-        // ("You know whats missing? 2 sounds. the button press sound when i press the keybind ..." - and, of the
-        // sound of our own it was first given: "Make it use the stock button click sound we use for the other
-        // buttons.") The key PRESSES THE BUTTON: the game's own Use() of the yellow button on the desk, which is
-        // what a hand's click is - it goes down and comes back, it makes the game's click, and its port rises,
-        // which is the answer (on_press). The flag is set as well, for a desk that is not there to be pressed.
-        // (ONE Use() left it standing in: "sounds, but when i click it toggles. it needs to be momentary". The desk's
-        // buttons are held buttons - the game's mouse gives one Use() as it goes down on one and another as it lets
-        // go (ButtonNonVR: Pressed, Released). So does the key: in while it is held, out when it is let go, or the
-        // driver is aboard no longer.)
+        // VIGILANCE KEY (eu07_mod.settings); not KeyBinding.Down(): it fails for a modifier-only binding
+        // presses the desk button via Use() (click + port edge); Use() again on release (hold button)
         if (power != null && player_aboard && key_down(eu07_mod.settings.vigilance))
         {
             Interlocked.Exchange(ref _want_vigilance, 1);
-            if (_vigilance_button == null && _car != null && _car.loadedExternalInteractables != null)
-                _vigilance_button = _car.loadedExternalInteractables.GetComponentsInChildren<DV.CabControls.ButtonBase>(true).FirstOrDefault(one => one.name == "C_Vigilance");
+            // live cab's button; cab B's is under DeskB
+            if ((_vigilance_button == null || _vigilance_button_cab != _live_cab) && _car != null && _car.loadedExternalInteractables != null)
+            {
+                _vigilance_button = _car.loadedExternalInteractables.GetComponentsInChildren<DV.CabControls.ButtonBase>(true).FirstOrDefault(one => one.name == "C_Vigilance"
+                    && one.GetComponentsInParent<Transform>(true).Any(up => up.name == "DeskB") == (_live_cab == cab_b));
+                _vigilance_button_cab = _live_cab;
+            }
             if (_vigilance_button != null && !_vigilance_button.IsOn)
             {
                 _vigilance_button.Use();
@@ -2062,8 +1882,7 @@ internal class eu07_driver: MonoBehaviour
         text.Append(lamp(power.compressor_tripped, "compressor overload"));
         text.Append(lamp(power.heating_on, "ogrzewanie pociagu"));
         text.AppendLine(lamp(power.undervoltage, "no line voltage"));
-        // The last-mile battery, while its switch is on or it is charging; and why its contactor
-        // is not in, which from the desk is only a lamp that stays dark.
+        // last-mile battery, and why its contactor is not in
         if (power.battery_wanted || power.battery_charging)
         {
             text.Append($"battery <b>{power.battery_charge * 100.0f:F0} %</b>   {power.battery_volts:F0} V   {power.battery_amps:F0} A of {eu07_sim.power_circuit.battery_max_amps:F0}   ");
@@ -2077,15 +1896,11 @@ internal class eu07_driver: MonoBehaviour
             else if (power.battery_contactor)
                 text.AppendLine($"<color=grey>on the battery: series only (to {eu07_sim.power_circuit.battery_top_position}), the field whole; the main breaker will not close until its switch is off</color>");
         }
-        // The reset button's own circuit runs through the reverser off neutral and the wheel at 0:
-        // pressed in neutral or with the wheel off 0 it does nothing, which from the desk looks
-        // like a relay that will not reset ("stuck at ground fault. im neutral, under way" - the
-        // author, 2026-10-10; it was the motor overload, and it cleared in forward).
+        // reset needs reverser off neutral and wheel at 0
         if ((power.overcurrent_tripped || power.earth_fault_tripped) && power.health > 0.0f
             && (power.contactors.direction == 0 || power.contactors.wanted != 0 || power.contactors.position != 0))
             text.AppendLine("<color=yellow><b>[to reset: reverser forward or back, wheel at 0, then the reset button]</b></color>");
-        // The earth-fault relay has ONE condition under which it will not reset: a drivetrain with
-        // nothing left. Said here, because from the desk it only looks like a dead button.
+        // earth fault will not reset at 0 % drivetrain health
         text.AppendLine(power.health <= 0.0f
             ? "<color=yellow><b>[electrical drivetrain destroyed: the earth fault will not reset until it is repaired]</b></color>"
             : $"<color=grey>electrical drivetrain {power.health * 100.0f:F0} %   (a flashover costs {eu07_sim.power_circuit.flashover_damage:F0} hit points; at 0 % the earth fault stays)</color>");

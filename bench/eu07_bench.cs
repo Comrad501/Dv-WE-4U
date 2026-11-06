@@ -1,20 +1,13 @@
-// EU07 / 303E - a bench for the locomotive's power circuit, outside the game.
-//
-// Drop this file and the four eu07_*.cs files into unit_A/ of a checkout of Knsgf's
-// WE6SIM, build it in Debug, and run bench/runner against the DLL. The diagram is compiled
-// by HIS compiler, switched by HIS contactor sets and solved by HIS solver; nothing here
-// is a port. What it prints:
-//
-//   1. contactors the diagram has that no set owns
-//   2. at a standstill, every controller position: line current and what the line sees
-//   3. at speed, the two running positions through every field step. Hold this against
-//      the DTR: 0.75 of its tractive effort at the same speeds, on a new 1250 mm wheel
-//      where the DTR's figures are for a half worn one (3% faster)
-//   4. the protection: undervoltage, overcurrent trip and reset, the PLW button, motors cut out;
-//      the converter, compressors and heating; earth fault; the slip relays; the lamps
-//   5. a train started from rest by a driver who watches the ammeters
-//
-// 2 and 3 are run with the overcurrent relays bypassed; nobody stands on position 28.
+// EU07 / 303E power circuit bench, outside the game.
+// Setup: this + the four eu07_*.cs into unit_A/ of Knsgf's WE6SIM, Debug build, run bench/runner on the DLL.
+// Knsgf's compiler, contactor sets and solver as they are; no port.
+// Prints:
+//   1. contactors no set owns
+//   2. standstill, every position: line current, line load
+//   3. at speed, both running positions, every field step (vs DTR: 0.75 of its effort; new 1250 mm wheel, +3%)
+//   4. protection: undervoltage, overcurrent, PLW, motors cut out, auxiliaries, earth fault, slip, lamps
+//   5. a start, driver watching the ammeters
+// 2 and 3: overcurrent relays bypassed.
 
 using System;
 using System.Collections.Generic;
@@ -74,7 +67,7 @@ internal partial class eu07_sim
 
         public float effort_kN => power.wheel_torque / (bench_wheel_diameter * 0.5f) * 0.001f;
 
-        // One tick as the game would run it, except that the solver is waited for.
+        // one game tick, solver waited for
         public void tick()
         {
             power.simulate(bench_tick);
@@ -88,7 +81,7 @@ internal partial class eu07_sim
                 tick();
         }
 
-        // Ticks until the ammeters stop moving. False if they never do.
+        // tick until ammeters settle; false if never
         public bool settle()
         {
             int quiet = 0;
@@ -126,9 +119,8 @@ internal partial class eu07_sim
 
     private static int _failures = 0;
 
-    // Standstill current of each motor group at each position, from part 2. The ratio of
-    // one row to the next is how much a step multiplies the current at any speed, since
-    // the back EMF does not change in the moment of the step.
+    // standstill amps per group per position (part 2)
+    // row-to-row ratio = current gain of a step at any speed (back EMF unchanged)
     private static readonly float[] _standstill_12 = new float[controller_positions], _standstill_34 = new float[controller_positions];
 
     private static void expect(bool passed, string what)
@@ -166,7 +158,7 @@ internal partial class eu07_sim
             return 1;
         }
 
-        // ---- 2. standstill ---------------------------------------------------------------
+        // ---- 2. standstill
         Console.WriteLine();
         Console.WriteLine("standstill, forward, full field");
         Console.WriteLine("pos   line A   M1,2 A  M3,4 A   line sees ohm   effort kN   fans V   resistors kW");
@@ -187,13 +179,13 @@ internal partial class eu07_sim
                 $"{(line > 0.5f ? (bench_line_volts / line).ToString("F3") : "open"),10}   {rig.effort_kN,9:F1} {power.fan_volts,8:F0} {power.resistor_heat * 0.001f,11:F0}");
         }
 
-        // (notching by itself works from this very table: eu07_auto_notching.cs)
+        // same table used by eu07_auto_notching.cs
         float table_off = 0.0f;
         for (int position = 1; position < controller_positions; ++position)
             table_off = Math.Max(table_off, Math.Max(Math.Abs(auto_notching.standstill_12[position] / _standstill_12[position] - 1.0f), Math.Abs(auto_notching.standstill_34[position] / _standstill_34[position] - 1.0f)));
         expect(table_off < 0.01f && bench_line_volts == auto_notching.table_volts, $"the table that notching by itself works from is this one: at most {table_off * 100.0f:F2} % off");
 
-        // ---- 3. the running positions, at speed ---------------------------------------------
+        // ---- 3. running positions at speed
         foreach (int position in new[] { parallel_running, series_running })
         {
             if (!rig.wheel_to(position))
@@ -230,7 +222,7 @@ internal partial class eu07_sim
         Console.WriteLine($"back at 0: line {power.line_current:F2} A. Points that never settled: {unsettled}");
         _failures += unsettled;
 
-        // ---- 4. protection -----------------------------------------------------------------
+        // ---- 4. protection
         Console.WriteLine();
         Console.WriteLine("protection");
         power.protection_bypassed = false;
@@ -272,7 +264,7 @@ internal partial class eu07_sim
         expect(power.line_contactors_closed, "they close again once the wheel has been to 0");
         rig.wheel_to(0);
 
-        // jazda ciagniona: hauled, the desk takes no power; back at train running, it does
+        // jazda ciagniona (hauled): no power; train running: power
         power.hauled = true;
         rig.wheel_to(2);
         rig.settle();
@@ -286,7 +278,7 @@ internal partial class eu07_sim
             $"back at train running it takes power: {power.ammeter_12:F0} A on 2");
         rig.wheel_to(0);
 
-        // The 600 A relays are blocked on high start, in series only; the 750 A one never.
+        // high start blocks the 600 A relays, series only; 750 A never
         int trip_normal = first_position_that_trips(rig, high: false), trip_high = first_position_that_trips(rig, high: true);
         expect(trip_normal > 0 && trip_high > trip_normal,
             $"at a standstill the relays trip on position {trip_normal}, on high start not until {trip_high}");
@@ -303,7 +295,7 @@ internal partial class eu07_sim
         power.cut_out_motors(false, false);
         power.close_fast_breaker();
 
-        // ---- the auxiliaries and the relays that open WS -----------------------------------
+        // ---- auxiliaries, relays opening WS
         Console.WriteLine();
         Console.WriteLine("auxiliaries");
         power.converter_switch = true;
@@ -368,7 +360,7 @@ internal partial class eu07_sim
         power.pantograph_air_ok = true;
         power.close_fast_breaker();
 
-        // Slip: one axle of the first bogie runs away at 30 km/h on position 20.
+        // slip: one axle, bogie 1, 30 km/h, position 20
         rig.km_h = 30.0f;
         power.protection_bypassed = true;
         rig.wheel_to(20);
@@ -387,7 +379,7 @@ internal partial class eu07_sim
         rig.run(8.0f);
         expect(!power.slip_detected, "gone when the axles agree again");
 
-        // Plugging: rolling forward, thrown into reverse, power on.
+        // plugging: rolling forward, reverser thrown, power on
         Console.WriteLine();
         Console.WriteLine("plugging");
         power.take_damage();
@@ -409,7 +401,7 @@ internal partial class eu07_sim
         rig.wheel_to(0);
         rig.run(0.5f);
         rig.km_h = 80.0f;
-        power.protection_bypassed = true;                 // so that the overcurrent relays do not end it first
+        power.protection_bypassed = true;                 // overcurrent relays out of the way
         rig.wheel_to(8);
         float waited = 0.0f;
         while (power.flashovers == 0 && waited < 30.0f)
@@ -418,7 +410,7 @@ internal partial class eu07_sim
             waited += 0.1f;
         }
         float plug_stress = power.plugging_stress;
-        rig.run(0.2f);                                    // the relay has tripped; WS answers on the next tick
+        rig.run(0.2f);                                    // relay tripped; WS opens next tick
         Console.WriteLine($"  80 km/h forward, reverse on 8: {plug_stress:F2} of rated power; a flashover after {waited:F1} s " +
             $"(flashovers {power.flashovers}, earth fault {power.earth_fault_tripped}, WS {power.fast_breaker_closed})");
         expect(power.flashovers == 1 && power.earth_fault_tripped && !power.fast_breaker_closed, "from speed a commutator flashes over: earth fault, WS out");
@@ -455,31 +447,29 @@ internal partial class eu07_sim
         Console.WriteLine($"  on 0: LS5 {power.on_resistors}, LS6 {power.fans_failed}, LS10 {!power.line_contactors_closed}, fans at {power.fan_speed:F2}");
         expect(!power.on_resistors && !power.fans_failed && !power.line_contactors_closed, "at 0: neither lamp, line contactors open");
 
-        // A wire that flickers, on position 43 at speed: a bouncing pantograph. It tripped the
-        // author's motor relays at 106 km/h with 135 A in the motors (2026-10-10): every step of
-        // the wire, down or up, was a tick of a thousand amperes and more in a circuit with no
-        // inductance, and three ticks running are the relays' 0.06 s.
+        // bouncing pantograph, 43 at speed: must not trip with the field following the supply
+        // (without it: 1000+ A per step, no inductance; 3 ticks = relays' 0.06 s)
         Console.WriteLine();
         Console.WriteLine("a flickering wire at speed");
         foreach (bool follows in new[] { false, true })
         {
             power.supply_follows_field = follows;
-            power.field_loop_gain_limit = follows ? 0.2f : float.PositiveInfinity;      // "as it was" is every protection off
+            power.field_loop_gain_limit = follows ? 0.2f : float.PositiveInfinity;      // unprotected
             power.field_unmade_by_reversal = follows;
-            power.heating_switch = false;               // as the author ran: converter only, 17 A from the wire
+            power.heating_switch = false;               // converter only, 17 A
             power.compressor_switch[0] = power.compressor_switch[1] = false;
             power.reset_auxiliary_relays();
             power.reset_relays();
             if (!power.fast_breaker_closed)
                 power.close_fast_breaker();
-            rig.run(6.0f);                              // the converter up again, if an earlier test left it down
+            rig.run(6.0f);                              // converter back up
             rig.km_h = 106.0f;
             rig.wheel_to(43);
             rig.settle();
             float steady = power.ammeter_12, worst = 0.0f;
             for (int tick = 0; tick < 250; ++tick)
             {
-                power.line_volts = tick < 20 && tick % 2 == 0 ? 1350.0f : bench_line_volts;      // 0.4 s between 1350 and 1500 V, then steady
+                power.line_volts = tick < 20 && tick % 2 == 0 ? 1350.0f : bench_line_volts;      // 0.4 s of 1350/1500 V, then steady
                 rig.tick();
                 worst = Math.Max(worst, power.relay_amps);
             }
@@ -501,8 +491,7 @@ internal partial class eu07_sim
         power.supply_follows_field = true;
         power.field_loop_gain_limit = 0.2f;
 
-        // The wheel run back from 43 to 0 at speed: through 29 to 28 the motors go from two in
-        // series to four, with a field a second old - the author's ghost overload at 128.6 km/h.
+        // wheel 43 -> 0 at speed: 29 -> 28 regroups with a stale field; must not read as overload
         Console.WriteLine();
         Console.WriteLine("the wheel run back at speed");
         foreach (bool unmade in new[] { false, true })
@@ -525,7 +514,7 @@ internal partial class eu07_sim
             {
                 rig.tick();
                 worst = Math.Max(worst, power.relay_amps);
-                if (!power.line_contactors_closed && ++out_for == 5)          // a tenth of a second after the contactors opened
+                if (!power.line_contactors_closed && ++out_for == 5)          // 0.1 s after contactors open
                     pull_after = rig.effort_kN;
             }
             if (unmade)
@@ -543,7 +532,7 @@ internal partial class eu07_sim
         }
         power.field_unmade_by_reversal = true;
 
-        // ---- 5. a start --------------------------------------------------------------------
+        // ---- 5. a start
         foreach (float train_tonnes in new[] { 0.0f, 600.0f, 2000.0f })
             start_a_train(rig, train_tonnes);
         start_a_train(rig, 2000.0f, careful: false);
@@ -564,6 +553,11 @@ internal partial class eu07_sim
         frame_cocks();
         if (Environment.GetEnvironmentVariable("EU07_BENCH_PLUGGING") != null)
             plugging_table();
+        if (Environment.GetEnvironmentVariable("EU07_BENCH_LOAD") != null)
+        {
+            load_ratings(rig);
+            stock_bench.run_all();
+        }
         if (Environment.GetEnvironmentVariable("EU07_BENCH_BATTERY") != null)
         {
             foreach (float share in new[] { 0.6f, 0.9f })
@@ -582,7 +576,7 @@ internal partial class eu07_sim
         return _failures == 0 ? 0 : 1;
     }
 
-    // The starting resistors' heat, and the fans it drives.
+    // starting resistor heat, fans
     private static void resistor_heat()
     {
         Console.WriteLine();
@@ -593,7 +587,7 @@ internal partial class eu07_sim
         power.set_reverser(1);
         rig.run(0.5f);
         power.close_fast_breaker();
-        // what the real circuit gives the fans at working currents, for the record: plenty, on every notch tried
+        // fan supply at working currents, for the record
         foreach ((int position, float speed) in new[] { (36, 45.0f), (32, 35.0f), (24, 25.0f), (18, 15.0f) })
         {
             rig.km_h = speed;
@@ -618,7 +612,7 @@ internal partial class eu07_sim
             }
             Console.WriteLine($"        at a stand, wheel at 0: {power.motor_heat * 0.001f:F1} kW");
         }
-        rig.run(1800.0f);                                   // cold again
+        rig.run(1800.0f);                                   // cool down
         const int notch = 32;
         rig.km_h = 35.0f;
         power.set_controller(notch);
@@ -630,7 +624,7 @@ internal partial class eu07_sim
         float hot = power.resistor_celsius;
         expect(hot > power_circuit.fans_from_celsius + 20.0f && power.fan_by_heat > 0.3f,
             $"two minutes of it: {hot:F0} C; the heat alone would have the fans at {power.fan_by_heat:F2}, the current has them at {power.fan_by_current:F2}");
-        rig.run(180.0f);                                    // (not ten, as it was: at this current a grid would be gone - grid_heat, below)
+        rig.run(180.0f);                                    // any longer burns a grid (grid_heat)
         Console.WriteLine($"        three minutes more: {power.resistor_celsius:F0} C, the fans at {power.fan_speed:F2} - where what is lost and what is blown away meet; the grid that stays in at {power.grid_celsius:F0} C");
         hot = power.resistor_celsius;
         power.set_controller(0);
@@ -651,7 +645,7 @@ internal partial class eu07_sim
         expect(power.fan_speed < 0.01f, "with the main breaker out they have nothing to run on, however hot");
     }
 
-    // The grid that stays in: minutes at a heavy current, for good at a light one, and what becomes of it held too long.
+    // grid left in: minutes heavy, indefinitely light, burnt if held too long
     private static bench_rig rig_on(int notch, float km_h)
     {
         bench_rig rig = new bench_rig();
@@ -664,8 +658,8 @@ internal partial class eu07_sim
         return rig;
     }
 
-    // That notch drawing that current, the grids cold: reached as a driver reaches a heavy current - notched up
-    // at speed, and the speed then let fall (at a fixed low speed the notches on the way trip the relays).
+    // notch at given current, grids cold: notched up at speed, then speed let fall
+    // (at a fixed low speed the notches on the way trip the relays)
     private static bench_rig rig_drawing(int notch, float amps)
     {
         bench_rig rig = rig_on(notch, 130.0f);
@@ -723,7 +717,7 @@ internal partial class eu07_sim
         }
         rig.run(10.0f);
         expect(reset && power.grids_burnt == 1 && power.ammeter_12 > 100.0f && power.take_damage() > 1.0f,
-            $"the relay resets and she takes power again, the grids at {power.grid_celsius:F0} C still: no second grid, but the wear goes on");
+            $"the relay resets and it takes power again, the grids at {power.grid_celsius:F0} C still: no second grid, but the wear goes on");
         power.set_controller(0);
         float cooling = seconds_until(rig, () => power.grid_celsius < power_circuit.grids_warm_celsius, 7200.0f);
         expect(cooling < 900.0f, $"wheel at 0, the fans running on while the bank is warm: black again, below {power_circuit.grids_warm_celsius:F0} C, after {cooling:F0} s");
@@ -752,7 +746,7 @@ internal partial class eu07_sim
                     $"at {amps:F0} A, fans at {fans:F2} then {power.fan_speed:F2}: {power.grid_celsius:F0} C after an hour, and nothing lost");
         }
 
-        // a start as a heavy train's is - two and a half minutes of 675 A - and another five minutes later
+        // heavy start: 2.5 min at 675 A, again 5 min later
         rig = rig_drawing(notch, 675.0f);
         float start_km_h = rig.km_h;
         power = rig.power;
@@ -761,7 +755,7 @@ internal partial class eu07_sim
         power.set_controller(0);
         rig.run(300.0f);
         float between = power.grid_celsius;
-        rig.km_h = 130.0f;                                   // (back onto the notch as before: at speed, and the speed let fall)
+        rig.km_h = 130.0f;                                   // onto the notch as before
         power.set_controller(notch);
         rig.run(6.0f);
         while (rig.km_h > start_km_h)
@@ -779,8 +773,7 @@ internal partial class eu07_sim
         float unblown = seconds_until(rig, () => power.grid_celsius >= power_circuit.grids_hot_celsius, 3600.0f);
         expect(unblown < to_hot - 20.0f, $"at {power.ammeter_12:F0} A with the fans dead: hot after {unblown:F0} s");
 
-        // a running notch has no grid in: the same current for as long, and they stay cold
-        // (reached as a driver reaches it: notched up at speed, and the speed then let fall until she pulls)
+        // running notch, no grid in: same current, grids stay cold
         rig = rig_on(series_running, 90.0f);
         power = rig.power;
         while (power.ammeter_12 < 700.0f && rig.km_h > 5.0f)
@@ -794,7 +787,7 @@ internal partial class eu07_sim
             $"on {series_running}, the series running notch, {amps:F0} A for ten minutes: {power.grid_celsius:F0} C");
     }
 
-    // The converter's knife switch is an isolator: opened on a converter that has been switched off, nothing; on one that runs, an arc.
+    // converter knife = isolator: off first, nothing; running, an arc
     private static void converter_knife()
     {
         Console.WriteLine();
@@ -808,7 +801,7 @@ internal partial class eu07_sim
         rig.run(30.0f);
         bool ran = power.converter_charging;
         power.take_damage();
-        power.converter_switch = false;                     // as it should be done: off at the desk, then the knife
+        power.converter_switch = false;                     // desk switch off, then knife
         rig.run(1.0f);
         power.converter_knife_open = true;
         rig.run(1.0f);
@@ -821,15 +814,15 @@ internal partial class eu07_sim
         rig.run(30.0f);
         bool again = power.converter_charging;
         int arcs_before = power.arcs;
-        power.converter_knife_open = true;                  // pulled on a running converter
+        power.converter_knife_open = true;                  // knife on a running converter
         rig.run(0.5f);
         float lost = power.take_damage();
         expect(again && power.knife_arcs == 1 && power.arcs == arcs_before + 1 && power.earth_fault_tripped && !power.fast_breaker_closed && Math.Abs(lost - power_circuit.knife_arc_damage) < 0.5f,
             $"pulled on a running converter: an arc, the earth-fault relay out and the main breaker with it, {lost:F0} hit points of 1000 lost");
     }
 
-    // Behind a foreign desk: a throttle comes, and the wheel and the field lever are worked for it (eu07_auto_notching.cs).
-    // A train of so many tonnes behind the locomotive's 80, on so much of a gradient, for so long; the throttle as given.
+    // foreign desk: throttle in, wheel and field worked for it (eu07_auto_notching.cs)
+    // train tonnes + loco 80 t, gradient, time, throttle
     private sealed class hauled_train
     {
         public readonly bench_rig     rig = new bench_rig();
@@ -866,10 +859,10 @@ internal partial class eu07_sim
                     power.set_field_weakening(auto.field);
                 }
                 else
-                    power.set_controller((int) Math.Round(throttle * (controller_positions - 1)));      // as it was: the throttle is a notch
+                    power.set_controller((int) Math.Round(throttle * (controller_positions - 1)));      // direct: throttle = notch
                 rig.km_h = km_h;
                 rig.tick();
-                // 2 N a kN rolling, the air by the square of the speed, the gradient; standing, it does not roll back
+                // rolling 2 N/kN, air ~ v^2, gradient; no rolling back
                 float newtons = rig.effort_kN * 1000.0f - _tonnes * 9.81f * (2.0f + _per_mille) - 4.0f * km_h * km_h;
                 km_h = Math.Max(0.0f, km_h + newtons / (_tonnes * 1000.0f) * bench_tick * 3.6f);
                 time += bench_tick;
@@ -900,8 +893,7 @@ internal partial class eu07_sim
         public string where => $"{km_h:F0} km/h on {rig.power.contactors.position} field {rig.power.contactors.field}, {rig.power.ammeter_12:F0} A, the grids at {rig.power.grid_celsius:F0} C";
     }
 
-    // What each contactor has been through (eu07_contactor_marks.cs): heat for the ones that stood shut while a grid
-    // burnt, soot for the one that broke an overload, nothing for the ones that stood open.
+    // contactor marks (eu07_contactor_marks.cs): heat if shut while a grid burnt, soot if it broke an overload
     private static void marked_contactors()
     {
         Console.WriteLine();
@@ -910,8 +902,7 @@ internal partial class eu07_sim
         expect(names.Length == 48 && names.All(name => new bench_rig().power.contactor_locations.ContainsKey(name)) && contactor_marks.numbers == 16,
             $"{names.Length} contactors, every one of them the circuit's; kept as {contactor_marks.numbers} numbers");
 
-        // a grid burnt through, held on a resistance notch at 750 A (notch 8 at a stand, where the author held his, is
-        // some 700 A of this bench's: the grids go red on it and stay)
+        // grid burnt: resistance notch held at 750 A
         const int notch = 12;
         bench_rig rig = rig_drawing(notch, 750.0f);
         power_circuit power = rig.power;
@@ -939,8 +930,7 @@ internal partial class eu07_sim
         expect(marks.soot.All(mark => mark == 0.0f) && !power.fast_breaker_closed && names.All(name => !power.contactor_locations[name].is_contactor_on(name)),
             "the main breaker broke that current: the contactors fell out after it on a dead circuit, and none has soot");
 
-        // the overload relays throwing the line contactors out
-        // (notch 12 at a stand is 860 A, under the relays: 18 it is)
+        // overload relays drop the line contactors (notch 18; 12 is under the relays)
         rig = rig_on(18, 130.0f);
         power = rig.power;
         power.take_damage();
@@ -966,7 +956,7 @@ internal partial class eu07_sim
         expect(power.overcurrent_tripped && power.fast_breaker_closed && line_1 >= contactor_marks.soot_a_trip && line_3 == 0.0f && marks.heat.All(mark => mark == 0.0f),
             $"the overload relays out on {carried:F0} A in series: SL1, which broke it, sooted {line_1:F2}; SL3, which stood open, {line_3:F2}; no heat anywhere (sooted: {string.Join(" ", sooted)})");
 
-        // the wheel turned back under load: a little, on the ones that opened
+        // wheel back under load: a little soot on what opened
         rig = rig_drawing(notch, 600.0f);
         power = rig.power;
         power.take_damage();
@@ -982,7 +972,7 @@ internal partial class eu07_sim
         expect(sooted.Length >= 1 && marks.soot.Max() <= contactor_marks.soot_an_opening + 0.0001f && marks.heat.All(mark => mark == 0.0f),
             $"shut off by the wheel from 600 A: a very little soot ({marks.soot.Max():F4} at the most) on what opened on it ({string.Join(" ", sooted)}), no heat");
 
-        // kept and read back; cleaned by a repair
+        // pack/unpack; repair cleans
         marks.put(contactor_marks.index_of("SR7"), 1.0f, 0.5f);
         marks.put(contactor_marks.index_of("SP12"), 0.3f, 1.0f);
         contactor_marks read_back = new contactor_marks();
@@ -1002,7 +992,7 @@ internal partial class eu07_sim
         Console.WriteLine();
         Console.WriteLine("notching by itself, for a foreign throttle");
 
-        // a light train on the level, the throttle thrown wide open from a stand
+        // light train, level, throttle wide open from a stand
         hauled_train light = new hauled_train(300.0f, 0.0f);
         light.run(240.0f, 1.0f);
         power_circuit power = light.rig.power;
@@ -1015,7 +1005,7 @@ internal partial class eu07_sim
         light.run(5.0f, 0.0f);
         expect(power.contactors.position == 0 && power.ammeter_12 < 1.0f, $"the throttle shut: on {power.contactors.position}, {power.ammeter_12:F0} A");
 
-        // a heavy one on a hill it cannot get up to a running notch on: the case that was the question
+        // heavy train, grade too steep for a running notch; plain-notch throttle first, for comparison
         foreach (bool by_itself in new[] { false, true })
         {
             hauled_train heavy = new hauled_train(1500.0f, 14.0f) { by_itself = by_itself };
@@ -1029,14 +1019,14 @@ internal partial class eu07_sim
                     $"by itself, the throttle wide open: after half an hour {heavy.where}, still pulling {heavy.rig.effort_kN:F0} kN; never over {heavy.most_amps:F0} A or {heavy.most_celsius:F0} C, nothing lost; the wheel moved {heavy.moves} times");
         }
 
-        // the same train on a hill it CAN climb, slowly: through the resistance notches and off them
+        // same train, climbable grade: through the resistance notches
         hauled_train slow = new hauled_train(1500.0f, 4.0f);
         power = slow.rig.power;
         slow.run(900.0f, 1.0f);
         expect(!power.on_resistors && power.contactors.position >= series_running && slow.lost <= 0.0f && !power.overcurrent_tripped && slow.most_celsius < power_circuit.grids_hot_celsius,
             $"1500 t on 4 per mille, wide open: after a quarter of an hour {slow.where}; {slow.on_grids_seconds:F0} s on the grids, never over {slow.most_amps:F0} A or {slow.most_celsius:F0} C");
 
-        // with nothing to feed it, it waits at 0; and starts from 0 when it may
+        // no supply: waits at 0, then starts from 0
         hauled_train dead = new hauled_train(300.0f, 0.0f);
         power = dead.rig.power;
         power.open_fast_breaker();
@@ -1048,7 +1038,7 @@ internal partial class eu07_sim
             $"the main breaker out: the wheel waits at 0; closed again, it starts from 0 - {dead.where}, never over {dead.most_amps:F0} A");
     }
 
-    // When the protection breaks a heavy current, that is an arc; when the driver shuts off, it is not.
+    // arc when protection breaks heavy current; none when driver shuts off
     private static void arcs()
     {
         Console.WriteLine();
@@ -1099,7 +1089,7 @@ internal partial class eu07_sim
         power.close_fast_breaker();
         onto(series_running, 45.0f);
         before = power.arcs;
-        while (!power.overcurrent_tripped && rig.km_h > 5.0f)                 // slowed on 28 until the relays go
+        while (!power.overcurrent_tripped && rig.km_h > 5.0f)                 // slow on 28 until relays trip
         {
             rig.km_h -= 0.1f;
             rig.run(0.1f);
@@ -1109,8 +1099,7 @@ internal partial class eu07_sim
             $"the overload relays going out at {rig.km_h:F0} km/h: an arc, {power.arc_amps:F0} A broken");
     }
 
-    // "i cant reset motor ground fault when on battery" (the author, 2026-10-11): standing on the
-    // brakes with no wire, wound up on the battery until the overload relays go, then reset.
+    // overload relays must reset on battery (no wire, brakes on, wound up until trip)
     private static void battery_reset()
     {
         Console.WriteLine();
@@ -1121,10 +1110,7 @@ internal partial class eu07_sim
         power.set_reverser(1);
         power.battery_wanted = true;
         rig.run(0.5f);
-        // The wheel wound STRAIGHT up, as a careless hand does: notch by notch the battery's own breaker
-        // (700 A for 0.3 s) goes first, as it should - the starting resistors are made so that no
-        // notch throws the current up by much (2026-10-14; the simulator-derived set before them had
-        // a notch that added 43 %, which beat the battery's breaker to it).
+        // wheel wound straight up (careless); notch by notch the battery breaker (700 A, 0.3 s) goes first
         int position = series_running;
         power.set_controller(position);
         for (float waited = 0.0f; waited < 3.0f && !power.overcurrent_tripped && !power.battery_tripped; waited += 0.05f)
@@ -1145,7 +1131,7 @@ internal partial class eu07_sim
         expect(power.contactors.position == 1 && power.line_contactors_closed, "and the first notch takes again");
     }
 
-    // The pantographs' air: the small compressor from nothing, a raising, the main reservoir taking over.
+    // pantograph air: small compressor from empty, a raising, main reservoir takeover
     private static void pantograph_air_test()
     {
         Console.WriteLine();
@@ -1208,8 +1194,7 @@ internal partial class eu07_sim
         expect(took < 10.0f && fed_to > pantograph_air.feed_bar - 0.02f && air.bar > 4.9f, $"the cock back on the reservoir: {fed_to:F1} bar in {took:F0} s; the reservoir let down to 1, a minute on: {air.bar:F2} (it does not run back)");
     }
 
-    // As it stood in the game: the air come down from full to 4.34 bar, the main reservoir at 2.8 and
-    // its compressors off, the cock on the small compressor and that switched on.
+    // frame cocks; last case: 4.34 bar, main res. 2.8 bar, compressors off, cock on small compressor
     private static void frame_cocks()
     {
         Console.WriteLine();
@@ -1251,11 +1236,11 @@ internal partial class eu07_sim
                 air.simulate(0.1f);
         }
         run(5.0f);
-        air.cock_to_small = true;                   // turned to it with the circuit full: its pressure switch is open
+        air.cock_to_small = true;                   // circuit full: pressure switch open
         air.pump_wanted = true;
         run(5.0f);
         air.main_reservoir_bar = 2.8f;
-        air.bar = 4.34f;                            // four raisings later
+        air.bar = 4.34f;                            // after four raisings
         run(5.0f);
         expect(!air.pump_running && air.can_raise && air.breaker_air, $"at {air.bar:F2} bar: the small compressor stays out (its switch cuts in at {pantograph_air.pump_in_bar:F1}), and a pantograph MAY be raised");
         air.pantographs_up = 1;
@@ -1276,7 +1261,7 @@ internal partial class eu07_sim
         expect(!low.breaker_air && !low.can_raise, "a save's 3.2 bar: found open");
     }
 
-    // The 110 V: its battery, the switch, the breakers.
+    // 110 V: battery, switch, breakers
     private static void low_voltage_bus()
     {
         Console.WriteLine();
@@ -1298,7 +1283,7 @@ internal partial class eu07_sim
         run(1.0f);
         expect(low.live && !low.fed(low_breaker.headlights) && low.fed(low_breaker.lighting), "on again, the headlights' breaker out: they are not fed, the lighting is");
         low.breaker[(int) low_breaker.headlights] = true;
-        // standing dark with everything on: desk, both valves, three headlights bright, the cab's light
+        // standing, all loads on: desk, valves, 3 headlights bright, cab light
         low.load_watts = low_voltage.desk_watts + 2.0f * low_voltage.valve_watts + 3.0f * low_voltage.headlight_watts + low_voltage.cab_light_watts;
         float hours = 0.0f;
         while (low.live && hours < 100.0f)
@@ -1322,8 +1307,7 @@ internal partial class eu07_sim
         expect(hours > 2.0f && hours < 6.0f && !low.charging, $"full again after {hours:F1} h of that");
     }
 
-    // A joint in the wire, taken at speed with power on: 1.3 s of nothing. The breaker holds, nothing
-    // trips as the volts come back, and she pulls again; a dead stretch opens it.
+    // wire joint at speed, power on: 1.3 s dead, no trip, pulls again; a dead stretch opens WS
     private static void wire_joint()
     {
         Console.WriteLine();
@@ -1338,7 +1322,7 @@ internal partial class eu07_sim
         rig.km_h = 60.0f;
         power.set_controller(0);
         rig.run(10.0f);
-        for (int position = 1; position <= parallel_running; ++position)       // notched up as a driver would, not thrown
+        for (int position = 1; position <= parallel_running; ++position)       // notch by notch
         {
             power.set_controller(position);
             rig.run(0.5f);
@@ -1357,14 +1341,14 @@ internal partial class eu07_sim
         }
         rig.run(8.0f);
         expect(held && power.fast_breaker_closed && !power.overcurrent_tripped && power.contactors.position == parallel_running && rig.effort_kN > 0.8f * kN,
-            $"on 43 at 60 km/h ({amps:F0} A, {kN:F0} kN): 1.3 s without the wire, and she holds - {peak:F0} A at most as it comes back, then {power.ammeter_12:F0} A, {rig.effort_kN:F0} kN again");
+            $"on 43 at 60 km/h ({amps:F0} A, {kN:F0} kN): 1.3 s without the wire, and it holds - {peak:F0} A at most as it comes back, then {power.ammeter_12:F0} A, {rig.effort_kN:F0} kN again");
         expect(power.converter_speed > 0.95f, $"the converter has run down and up again by itself ({power.converter_speed:F2})");
         power.line_volts = 0.0f;
         rig.run(power_circuit.undervoltage_hold_seconds + 0.3f);
         expect(!power.fast_breaker_closed, "a dead stretch opens the breaker");
     }
 
-    // The motors' heat: what the blowers are worth, and (asked for) how long hard work takes to cook them.
+    // motor heat: blowers' worth, time to overheat
     private static void motor_heat()
     {
         Console.WriteLine();
@@ -1382,12 +1366,11 @@ internal partial class eu07_sim
             power.set_controller(0);
             rig.run(2.0f);
             power.reset_relays();
-            rig.km_h = 45.0f;                      // fast enough that walking up the notches trips nothing
+            rig.km_h = 45.0f;                      // fast enough to notch up without trips
             power.set_controller(series_running);
             rig.run(12.0f);
         }
-        // The speed is changed as a train's would be, a km/h a second: jumped, the current overshoots
-        // while the motors' fields catch up, and the relays - which see the wire, not the meters - go out.
+        // speed ramped 1 km/h/s: a jump overshoots the current and trips the relays
         void ease(float to)
         {
             while (Math.Abs(rig.km_h - to) > 0.05f)
@@ -1396,7 +1379,7 @@ internal partial class eu07_sim
                 rig.run(0.1f);
             }
         }
-        // On 28, slowed until the motors take so many amperes (the less speed, the more). Left there.
+        // on 28, slowed to the target current, then held
         void hold(float amps)
         {
             onto_28();
@@ -1465,7 +1448,7 @@ internal partial class eu07_sim
         power.set_controller(0);
     }
 
-    // The last-mile battery: what its contactor will and will not do.
+    // last-mile battery contactor
     private static void battery()
     {
         Console.WriteLine();
@@ -1512,7 +1495,7 @@ internal partial class eu07_sim
         before = power.battery_joules;
         rig.run(10.0f);
         expect(power.battery_charging && power.battery_joules > before, $"under the wire with the converter up it charges: {(power.battery_joules - before) / 3.6e+6f:F2} kWh in ten seconds");
-        power.battery_joules = 3.6e+4f;                    // a hundredth of a kWh left
+        power.battery_joules = 3.6e+4f;                    // 0.01 kWh left
         power.open_fast_breaker();
         power.set_controller(0);
         rig.run(1.0f);
@@ -1523,7 +1506,7 @@ internal partial class eu07_sim
         expect(!power.battery_contactor && power.battery_joules <= 0.0f && Math.Abs(rig.effort_kN) < 0.5f, "flat, its contactor opens and the pull is gone");
     }
 
-    // One run on the battery, for the table: how fast it gets, on what, and how far a full one goes.
+    // battery run, for the table: top speed, notch, range
     private static void battery_run(float train_tonnes, float grade, float share)
     {
         const float loco_tonnes = 83.4f, adhesion = 0.30f;
@@ -1539,7 +1522,7 @@ internal partial class eu07_sim
         {
             since_step += bench_tick;
             float take_next_below = step_when_below(position);
-            // a driver who watches the ammeters: the next notch only under a share of what the battery's breaker allows
+            // next notch only under a share of the battery breaker's limit
             if (since_step >= 0.6f && power.ammeter_12 < Math.Min(take_next_below, share * power_circuit.battery_max_amps) && position < series_running
                 && !power.overcurrent_tripped && !power.battery_tripped)
             {
@@ -1562,9 +1545,7 @@ internal partial class eu07_sim
             $"{(power.battery_tripped ? "; ITS BREAKER OPENED" : "")}{(power.overcurrent_tripped ? "; OVERCURRENT" : "")})");
     }
 
-    // What braking with the reverser against the run gives, and what it asks of the motors, at
-    // every speed and on the first notches. Printed on request (EU07_BENCH_PLUGGING): a table to
-    // read, not a test.
+    // plugging table, every speed, first notches; EU07_BENCH_PLUGGING; not a test
     private static void plugging_table()
     {
         float[] speeds = { 10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 80.0f, 100.0f, 120.0f };
@@ -1589,7 +1570,7 @@ internal partial class eu07_sim
                 power.set_controller(notch);
                 float amps = 0.0f, stress = 0.0f, kN = 0.0f;
                 bool tripped = false;
-                for (int tick = 0; tick < 500 && !tripped; ++tick)         // ten seconds: the field is slow to come up
+                for (int tick = 0; tick < 500 && !tripped; ++tick)         // 10 s: field is slow
                 {
                     rig.run(bench_tick);
                     amps    = Math.Max(amps, power.relay_amps);
@@ -1624,31 +1605,147 @@ internal partial class eu07_sim
         return tripped_at;
     }
 
-    // A driver who knows the locomotive: he takes the next position when the ammeters have
-    // fallen far enough that the step will land at 0.9 of the relay setting, and no higher
-    // than 450 A real. The steps are not alike - the standstill ramp's (1 to 6) and their mirror
-    // in parallel (29 to 32) each add a third, the rest about a sixteenth (design_resistors.py).
-    // Field steps he takes under 310 A real. Level track, a plain rolling resistance, and
-    // adhesion taken at 0.30: where the motors ask for more the wheels would be slipping.
-    private static float step_when_below(int position)
+    // skilled driver: next notch lands at 0.9 of relay setting, max 450 A real; field steps under 310 A
+    // steps 1-6 and 29-32 add ~1/3, others ~1/16 (design_resistors.py); level, adhesion 0.30
+    private static float _rating_land = 0.9f;     // load-rating landing, x relay setting
+    private static bool  _rating_high = false;    // HIGH START (WWR): 750 A real in series
+
+    private static float step_when_below(int position, bool to_the_relays = false)
     {
-        const float land_at = 0.9f * power_circuit.overcurrent_normal, never_above = 450.0f * current_ratio;
+        float relays  = to_the_relays && _rating_high && position < series_running ? power_circuit.overcurrent_high : power_circuit.overcurrent_normal;
+        float land_at = (to_the_relays ? _rating_land : 0.9f) * relays;
+        float never_above = to_the_relays ? land_at : 450.0f * current_ratio;
         if (position == 0)
             return never_above;
         if (position >= parallel_running)
             return 310.0f * current_ratio;
-        // 28 to 29 regroups the motors: each group goes from the whole line to half of it.
+        // 28 -> 29 regroups: each group from full line to half
         float grows = Math.Max(_standstill_12[position + 1] / _standstill_12[position], _standstill_34[position + 1] / _standstill_34[position]);
         return Math.Min(never_above, land_at / grows);
     }
 
-    // CAREFUL: he also waits for the needles to stop rising - they are damped, and read low for
-    // a moment after every notch. A careless driver notches by the reading alone, and as soon as
-    // the wheel will turn again (0.3 s, not 0.6), so he notches on a current still on its way up;
-    // with a heavy train at a stand that walks him into the relays, and it should ("it should trip if the driver is not careful enough", the
-    // author, 2026-10-14, of the starting resistors designed that day - whose standstill notches
-    // go up to the full starting current, where the old simulator-derived set stopped near
-    // 400 A real and so let a careless hand off).
+    // catalogue load ratings (EU07_BENCH_LOAD): heaviest train to 30 km/h in 15 min; level, 2 %, 2 % wet
+    // notch landing 0.9 of relays (EU07_BENCH_LOAD_LAND); eases off at red line (600 C)
+    // fail: relays, earth fault, 5 s unbroken slip, no 30 km/h; same test for DE6/DH4 (stock_locos.cs)
+    // adhesion 0.30 dry, 0.25 wet (game's own wet/dry ratio); 2 % limit: 27 -> 28 step, stuck at ~24 km/h
+    private static void load_ratings(bench_rig rig)
+    {
+        Console.WriteLine();
+        if (float.TryParse(Environment.GetEnvironmentVariable("EU07_BENCH_LOAD_LAND") ?? "", System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float land))
+            _rating_land = land;
+        _rating_high = Environment.GetEnvironmentVariable("EU07_BENCH_LOAD_HIGH") != null;
+        Console.WriteLine($"load ratings: the heaviest train started and brought to 30 km/h in 15 minutes, notches landing at {_rating_land:F2} of the relays" + (_rating_high ? ", HIGH START on in series" : ""));
+        foreach ((string label, float grade, float adhesion) in new[] { ("0 %", 0.0f, 0.30f), ("2 %", 0.020f, 0.30f), ("2 % wet", 0.020f, 0.25f) })
+        {
+            float ok = 0.0f, bad = 12000.0f;
+            string ok_how = "", bad_why = "";
+            while (bad - ok > 25.0f)
+            {
+                float tonnes = 0.5f * (ok + bad);
+                if (load_run(rig, tonnes, grade, adhesion, out string how))
+                {
+                    ok = tonnes;
+                    ok_how = how;
+                }
+                else
+                {
+                    bad = tonnes;
+                    bad_why = how;
+                }
+            }
+            Console.WriteLine($"  {label,-8} {ok,6:F0} t   ({ok_how}); {bad:F0} t: {bad_why}");
+        }
+    }
+
+    private static bool load_run(bench_rig rig, float train_tonnes, float grade, float adhesion, out string how)
+    {
+        const float loco_tonnes = 83.4f, target_km_h = 30.0f, limit_s = 900.0f;
+        power_circuit power = rig.power;
+        float mass = (loco_tonnes + train_tonnes) * 1000.0f, speed = 0.0f, since_step = 0.0f, slipping = 0.0f, hottest = 0.0f, peak_kN = 0.0f;
+        float last_12 = 0.0f, last_34 = 0.0f;
+        int position = 0, field = 0;
+        bool done = false, easing = false;
+        float slip_run = 0.0f, grip_run = 0.0f;
+        how = "";
+        power.grid_celsius = power_circuit.ambient_celsius;
+        power.health = 1.0f;
+        power.high_start = _rating_high;
+        rig.km_h = 0.0f;
+        rig.run(8.0f);
+        power.reset_relays();
+        float time = 0.0f;
+        for (; time <= limit_s; time += bench_tick)
+        {
+            since_step += bench_tick;
+            bool settled = power.ammeter_12 <= last_12 && power.ammeter_34 <= last_34;
+            last_12 = power.ammeter_12;
+            last_34 = power.ammeter_34;
+            float below = step_when_below(position, to_the_relays: true);
+            // red line: back one, hold until under 560 C
+            // slip: back one per second of slip; next notch after 2 s of grip (as stock locos)
+            if (((power.grid_celsius >= power_circuit.grids_hot_celsius && since_step >= 2.0f) || (slip_run > 0.0f && since_step >= 1.0f)) && position > 1)
+            {
+                if (field > 0)
+                    power.set_field_weakening(--field);
+                else
+                    power.set_controller(--position);
+                since_step = 0.0f;
+                easing = true;
+            }
+            if (easing && power.grid_celsius < power_circuit.grids_hot_celsius - 40.0f)
+                easing = false;
+            if (!easing && grip_run >= (position == 0 ? 0.0f : 2.0f) && since_step >= 0.6f && settled && power.ammeter_12 < below && power.ammeter_34 < below && !power.overcurrent_tripped)
+            {
+                if (position < parallel_running)
+                    power.set_controller(++position);
+                else if (field < field_positions - 1)
+                    power.set_field_weakening(++field);
+                since_step = 0.0f;
+            }
+            rig.tick();
+
+            float force = power.wheel_torque / (bench_wheel_diameter * 0.5f), grip = loco_tonnes * 1000.0f * 9.81f * adhesion;
+            if (force > grip)
+            {
+                force     = grip;
+                slipping += bench_tick;
+                slip_run += bench_tick;
+                grip_run  = 0.0f;
+            }
+            else
+            {
+                slip_run  = 0.0f;
+                grip_run += bench_tick;
+            }
+            float v_km_h     = speed * 3.6f;
+            float resistance = mass * 9.81f * (0.001f * (1.5f + 0.00025f * v_km_h * v_km_h) + grade);
+            speed    = Math.Max(0.0f, speed + (force - (speed > 0.0f || force > resistance ? resistance : force)) / mass * bench_tick);
+            rig.km_h = speed * 3.6f;
+            hottest  = Math.Max(hottest, power.grid_celsius);
+            peak_kN  = Math.Max(peak_kN, force * 0.001f);
+
+            if (power.overcurrent_tripped)       { how = $"the relays, on {position} at {rig.km_h:F0} km/h"; break; }
+            if (power.earth_fault_tripped)       { how = $"an earth fault, on {position} at {rig.km_h:F0} km/h"; break; }
+            if (slip_run > 5.0f)                 { how = $"slipping, on {position} at {rig.km_h:F0} km/h"; break; }
+            if (rig.km_h >= target_km_h)         { done = true; break; }
+        }
+        if (done)
+            how = $"30 km/h in {time:F0} s, peak {peak_kN:F0} kN, grids {hottest:F0} C";
+        else if (how == "")
+            how = $"stalled at {rig.km_h:F0} km/h on {position}";
+        power.set_field_weakening(0);
+        power.set_controller(0);
+        rig.km_h = 0.0f;
+        rig.run(2.0f);
+        power.reset_relays();
+        power.grid_celsius = power_circuit.ambient_celsius;
+        power.health = 1.0f;
+        power.high_start = false;
+        return done;
+    }
+
+    // careful: waits for the damped needles to stop rising
+    // careless: reading only, every 0.3 s; heavy train from a stand should trip the relays
     private static void start_a_train(bench_rig rig, float train_tonnes, bool careful = true)
     {
         const float loco_tonnes = 83.4f, adhesion = 0.30f;
@@ -1664,7 +1761,7 @@ internal partial class eu07_sim
         Console.WriteLine($"a start: locomotive {loco_tonnes} t and {train_tonnes:F0} t behind it, level" + (careful ? "" : ", a CARELESS driver"));
         Console.WriteLine("    s   km/h  pos fld  M1,2 A  M3,4 A  effort kN  fans V  resistors kW");
         rig.km_h = 0.0f;
-        rig.run(8.0f);            // the meters are filtered: let the last test die away
+        rig.run(8.0f);            // let filtered meters settle
         for (float time = 0.0f; time <= 900.0f && at_120 < 0.0f; time += bench_tick)
         {
             since_step += bench_tick;

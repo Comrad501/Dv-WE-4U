@@ -29,8 +29,8 @@ the desk's yellow button answers it, or a key: keypad Enter, changed on the mod'
 
 - It is an indev build: controls, ports and saved state may change, and a save made with it may not
   load cleanly in a later one. Keep a save without it.
-- Cab B has no desk yet; drive from cab A. No seats.
-- The bogies and the pantographs are still flat colours.
+- No seats.
+- The pantographs are still flat colours.
 - The SHP train stop (and its lamp in the box on the sill) comes with the signalling mod, which is not
   released yet.
 - The starting resistors are designed, not measured: no document with their ohms was found. Notch on
@@ -59,15 +59,14 @@ the desk's yellow button answers it, or a key: keypad Enter, changed on the mod'
 - Component values: starting resistors designed from the real wiring, the motor fitted to the documentation and its mean starting effort, relays and fan ratings, scaled for 1500 kW on 1500 V; field shunts worked out from the documentation's percentages.
 - The C# compiles against Knsgf's simulation and runs on his solver on a bench: all 44 controller positions and 7 field steps, and the motor reproduces the documented continuous rating at full and at minimum field to within about 2%.
 - The fast breaker, relays and meters are in, and on the bench a driver starts 600 t and 2000 t trains with it without tripping anything.
-- In the game it is a vehicle of its own (the WE-4U): a modelled body with a machine room one can walk through, a desk in cab A with the real one's lamps, buttons and switches, working doors, wipers, horn and sanding, and its own sounds.
+- In the game it is a vehicle of its own (the WE-4U): a modelled body with a machine room one can walk through, a desk in each cab with the real one's lamps, buttons and switches, working doors, wipers, horn and sanding, and its own sounds.
 - Besides the traction circuit: a 110 V battery with its switch and breakers under a flap in the assistant's desk, pantograph air with the small compressor and three-way cock in the machine room, heat in the starting resistors and the motors, a last-mile traction battery (not on the real locomotive).
 - Running on the resistors has a limit, by the ammeter and the clock: the grids heat with the square of the motors' current (on the desk's ammeters about 5 minutes at 750 A and 10 at 600 A from cold; 450 A can be held). The fault lamp is steady from 400 C and blinks from 600 C, where they wear the drivetrain's health; at 800 C one goes: an earth fault, and a fifth of that health. The figures are ours, not an instruction's.
 - Behind one of the game's own locomotives (its multiple-unit cable with this cab cut out, or its radio) the throttle that arrives is taken as how much is wanted, and the wheel and the field lever are worked by themselves: notch by notch under a current limit, resting only on the running notches, shunting there, easing off as the grids warm. The real locomotive has no such thing.
-- To the other units of a train she says what the game's locomotives say to one another, a temperature that lights every desk's motor-temperature lamp (steady from 90, blinking from 105): her motors' heat, and "critical" when power is asked of her and she cannot give any - overload relays out, main breaker open, earth fault - unless the hauled-run switch is up; also her starting resistors, warm or red hot.
+- To the other units of a train it says what the game's locomotives say to one another, a temperature that lights every desk's motor-temperature lamp (steady from 90, blinking from 105): its motors' heat, and "critical" when power is asked of it and it cannot give any - overload relays out, main breaker open, earth fault - unless the hauled-run switch is up; also its starting resistors, warm or red hot.
 - There is NO on-screen panel and there are no hidden keys: what the locomotive has to say, its desk, lamps and gauges say. (A developer gets a status panel, keypad keys and a file-based command hook by making a `debug` folder in the mod's folder; keypad 3 shows the panel.)
 - It is painted: a livery of its own, deep blue with a darker band and pale yellow lines, lettered WE-4U; worn as delivered, and the game's paint cans give it fresh paint, rust, or primer to repaint over. The machine room is shaded and dusted, and its plates and signs say what things are.
 - Vigilance: the game's own device, mounted in the cupboard under the desk, answered from the desk, with its lamp and buzzer in the box on the sill and its own valve and cut-off cock. The SHP train stop is answered the same way and comes with the signalling mod.
-- Not done: cab B's desk; the bogies and the pantographs are still flat colours.
 
 ## The paint
 

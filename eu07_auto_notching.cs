@@ -1,38 +1,19 @@
-// EU07 / WE-4U - notching by itself, for a locomotive whose throttle comes from a vehicle that is not one of ours.
+// EU07 / WE-4U automatic notching, when the throttle comes from a foreign MU leader.
 //
-// "Does the game know how to bocznikowanie? we dont want to overheat under way" (the author,
-// 2026-10-12). It does not. The game's multiple-unit cable carries a THROTTLE, 0 to 1, and
-// nothing of ours: behind a diesel the wheel went wherever that fraction of 43 fell - nearly
-// always a resistance notch, held for as long as the diesel's driver held his lever, and
-// never a field shunt (the lever for that is shared between two of ours only). And a throttle
-// thrown open from a stand walked the contactors up at their own pace into the overload relay.
-//
-// So, led by a foreign desk (mod/eu07_driver.cs says when), the throttle is taken for what a
-// diesel's is - HOW MUCH is wanted - and the wheel and the field lever are worked as a driver
-// works them:
-//   - the throttle picks a STAGE to end on, of fourteen: series running with the field lever at
-//     0 to 6, then parallel running with it at 0 to 6; and the most current a notch may bring,
-//     from least_amps to most_amps. On the way to parallel it shunts on the series notch
-//     first, all six, as a driver does: the faster she is going when the resistors come in
-//     again, the less they are asked to take;
-//   - the wheel goes up a notch when the NEXT notch would not bring more than that, and RESTS
-//     only on 28 or 43. What the next notch would bring is worked out, not waited for: the
-//     notches are not alike (the ramp's at a standstill, 1 to 6, and their mirror on 29 to 32,
-//     each throw the current up by a third; a relay that notched up under a fixed current ran
-//     into the overload on such a notch). From the current now and
-//     the resistance now, the motors' back-EMF; from that and the next notch's resistance, the
-//     current then - an upper bound, since the EMF rises with the current;
-//   - on the running notch the shunts go in one at a time, with room left for what each adds;
-//   - too much current (the speed falling on a hill): shunts out one at a time, then notches back;
-//   - THE GRIDS WARM (eu07_power_circuit.cs, "the grids that stay in"): the most a notch may
-//     bring is eased, down to a current they carry for good, and it notches BACK to keep to it -
-//     a unit that cannot get off its resistors pulls less, for as long as it must, and loses
-//     nothing; it does not leave series running for the parallel notches while they are warm,
-//     and comes back to it from them when they are as warm as it lets them get; were they to
-//     come near red all the same, it shuts off until they are black;
-//   - wheels slipping: no further up.
-// None of this is the real locomotive, which has no such thing: it is what lets ours work
-// behind one of the game's.
+// The game's MU cable carries only a 0-1 throttle; mapped straight onto the wheel it parks on
+// resistance notches and never shunts. So (mod/eu07_driver.cs decides when) the throttle is
+// read as demand and the wheel and field lever are worked like a driver would:
+//   - throttle -> target stage (14: series running + field 0-6, then parallel + field 0-6)
+//     and a per-notch current limit (least_amps..most_amps); series shunts all in before parallel;
+//   - notch up when the next notch's predicted current fits the limit; rest only on 28 or 43.
+//     Prediction: back-EMF from current and resistance now, then next notch's current
+//     (upper bound, EMF rises with current); notches differ (1-6, 29-32 jump ~1/3);
+//   - running notch: shunts in one at a time, with headroom;
+//   - overcurrent (slowing on a hill): shunts out, then notch back;
+//   - warm grids (eu07_power_circuit.cs): limit eased to a sustainable current, notch back to
+//     hold it; stay in series while warm; shut off near red until black;
+//   - wheelslip: no notching up.
+// Not on the real locomotive.
 
 using System;
 
@@ -42,23 +23,23 @@ internal partial class eu07_sim
 {
     internal class auto_notching
     {
-        public const int   stages             = 2 * field_positions;     // 14: see above
-        public const float least_amps         = 350.0f;                  // the most a notch may bring with the throttle just open,
-        public const float most_amps          = 800.0f;                  // and with it wide (the overload relays stand at 900)
-        public const float back_amps          = 850.0f;                  // over this, a step back - whatever the throttle
-        public const float back_over          = 1.12f;                   // and on the resistors, over this much of what a notch may bring
-        public const float shunt_room         = 0.75f;                   // a field step in under this much of it: a step adds up to 27 %
-        public const float ease_from_celsius  = 450.0f;                  // the grids: from here what a notch may bring is eased
-        public const float ease_full_celsius  = 570.0f;                  // to eased_amps here, which they carry for good,
+        public const int   stages             = 2 * field_positions;     // 14
+        public const float least_amps         = 350.0f;                  // notch limit, throttle just open
+        public const float most_amps          = 800.0f;                  // throttle wide (relays at 900)
+        public const float back_amps          = 850.0f;                  // above: step back, any throttle
+        public const float back_over          = 1.12f;                   // on resistors: step back above this x limit
+        public const float shunt_room         = 0.75f;                   // field step in below this x limit (a step adds up to 27 %)
+        public const float ease_from_celsius  = 450.0f;                  // grids: easing starts
+        public const float ease_full_celsius  = 570.0f;                  // eased_amps here (sustainable)
         public const float eased_amps         = 450.0f;
-        public const float off_celsius        = 590.0f;                  // near red all the same: off,
-        public const float on_celsius         = 400.0f;                  // until black again
+        public const float off_celsius        = 590.0f;                  // near red: off
+        public const float on_celsius         = 400.0f;                  // back on
         public const float notch_seconds      = 0.5f;                    // between notches up
         public const float shunt_seconds      = 1.0f;                    // between field steps
-        public const float after_back_seconds = 5.0f;                    // no notch up so soon after one back
+        public const float after_back_seconds = 5.0f;                    // hold-off after a notch back
 
-        // What each pair of motors draws at a STAND on each position, at table_volts: the bench's own table
-        // (bench/eu07_bench.cs prints it, and fails if this is not it). From it, each position's resistance.
+        // per-pair standstill current per position at table_volts -> position resistance
+        // (bench/eu07_bench.cs prints and checks this table)
         public const float table_volts = 1500.0f;
         public static readonly float[] standstill_12 =
         {
@@ -77,15 +58,13 @@ internal partial class eu07_sim
              3775.3f,  4257.5f,  6402.1f, 12894.4f,
         };
 
-        // The greater pair's current on the next position up, from each pair's current on this one: at the same
-        // speed, with the motors' EMF as it is now. They give more EMF for more current, so it is never this much.
-        // (Each pair by itself: on the parallel notches the two have not the same resistance in, so not the
-        // same current, so not the same EMF - and it is the pair with the LESS that jumps the more.)
+        // greater pair's current on the next position, same speed and EMF (upper bound)
+        // pairs done separately: in parallel their resistances differ; the lower-current pair jumps more
         public static float next_amps(int position, float amps_12, float amps_34, float volts)
         {
             if (position < 0 || position >= controller_positions - 1)
                 return Math.Max(amps_12, amps_34);
-            int in_row(int at) => at <= series_running ? 4 : 2;                   // motors one after another in each path
+            int in_row(int at) => at <= series_running ? 4 : 2;                   // motors in series per path
             float pair(float[] standstill, float amps)
             {
                 float each = position == 0 ? 0.0f : Math.Max(0.0f, (volts - amps * table_volts / standstill[position]) / in_row(position));
@@ -94,13 +73,13 @@ internal partial class eu07_sim
             return Math.Max(pair(standstill_12, amps_12), pair(standstill_34, amps_34));
         }
 
-        public int   wheel     { get; private set; } = 0;                // what it asks of the controller
-        public int   field     { get; private set; } = 0;                // and of the field lever
-        public int   stage     { get; private set; } = 0;                // what the throttle asks: 0, or 1-14
-        public float may_bring { get; private set; } = 0.0f;             // the most a notch may bring, as eased
-        public bool  shut_off  { get; private set; } = false;            // for the grids' sake
+        public int   wheel     { get; private set; } = 0;                // asked of the controller
+        public int   field     { get; private set; } = 0;                // asked of the field lever
+        public int   stage     { get; private set; } = 0;                // from the throttle: 0, or 1-14
+        public float may_bring { get; private set; } = 0.0f;             // notch limit, eased
+        public bool  shut_off  { get; private set; } = false;            // grids too hot
 
-        public bool  series_only { get; private set; } = false;          // likewise: no parallel notches until they are black
+        public bool  series_only { get; private set; } = false;          // grids warm: no parallel until cool
 
         private float _wait = 0.0f, _no_up = 0.0f;
 
@@ -110,9 +89,8 @@ internal partial class eu07_sim
             _wait = _no_up = 0.0f;
         }
 
-        // demand: the throttle, 0-1. amps_12, amps_34: each pair's current as the overload relays see it, undamped
-        // (by the meters, which are damped, it notched up into the relays). volts: what feeds the traction circuit.
-        // position, field_now: where the contactors ARE. able: the line contactors may close.
+        // demand: throttle 0-1; amps_12/34: per pair, unfiltered (as relays see it); volts: traction feed
+        // position, field_now: actual contactors; able: line contactors may close
         public void step(float delta_seconds, float demand, float amps_12, float amps_34, float volts, int position, int field_now, bool able, bool slipping, float grid_celsius)
         {
             float amps = Math.Max(amps_12, amps_34);
@@ -129,11 +107,11 @@ internal partial class eu07_sim
             stage = demand <= 0.005f ? 0 : Math.Max(1, Math.Min(stages, (int) Math.Ceiling(demand * stages - 0.001f)));
             if (stage == 0 || !able || shut_off)
             {
-                wheel = field = 0;                       // (and from 0 again when it may: the contactors want the wheel there first)
+                wheel = field = 0;                       // restart from 0 (contactors need it)
                 _wait = notch_seconds;
                 return;
             }
-            bool  further = stage > field_positions;                               // parallel is asked for
+            bool  further = stage > field_positions;                               // parallel wanted
             int   run     = further && !series_only ? parallel_running : series_running;
             int   shunts  = further && run == series_running ? field_positions - 1 : (stage - 1) % field_positions;
             float most    = least_amps + (most_amps - least_amps) * Math.Min(1.0f, demand);
@@ -143,7 +121,7 @@ internal partial class eu07_sim
             may_bring = running ? most : eased;
 
             if (position != wheel || (running && field_now != field) || _wait > 0.0f)
-                return;                                  // the contactors are still on their way, or it has only just moved
+                return;                                  // contactors still moving, or just moved
             if (amps > (running ? back_amps : Math.Min(back_amps, eased * back_over)))
             {
                 if (running && field > 0)
@@ -162,7 +140,7 @@ internal partial class eu07_sim
             }
             if (wheel > run)
             {
-                --wheel;                                 // less is asked: down without waiting on anything
+                --wheel;                                 // less wanted: down at once
                 field = 0;
                 return;
             }
@@ -170,7 +148,7 @@ internal partial class eu07_sim
             {
                 if (wheel == series_running && (field < field_positions - 1 || warmth > 0.0f))
                 {
-                    // on the way to parallel: the series shunts first, all of them; and not on while the grids are warm
+                    // to parallel: all series shunts first; not while grids are warm
                     if (field < field_positions - 1 && !slipping && amps < most * shunt_room)
                     {
                         ++field;
@@ -178,7 +156,7 @@ internal partial class eu07_sim
                     }
                     return;
                 }
-                // (onto a running notch the grids are out: what it may bring is not eased for their sake)
+                // onto a running notch: grids out, limit not eased
                 bool onto_running = wheel + 1 == series_running || wheel + 1 == parallel_running;
                 if (!slipping && _no_up <= 0.0f && next_amps(wheel, amps_12, amps_34, volts) < (onto_running ? most : eased))
                 {

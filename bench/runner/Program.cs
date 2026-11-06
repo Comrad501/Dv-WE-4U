@@ -1,9 +1,6 @@
-// Loads a built electric_sim.dll and runs eu07_bench in it.
-//
-//     runner.exe <path to electric_sim.dll> <path to Derail Valley's Managed folder>
-//
-// The DLL is the mod, so it wants the game's assemblies; they are found where the game
-// keeps them, nothing is copied.
+// runs eu07_bench from a built electric_sim.dll
+//     runner.exe <electric_sim.dll> <Derail Valley's Managed folder>
+// game assemblies resolved in place, nothing copied
 
 using System;
 using System.IO;
