@@ -17,7 +17,7 @@ Needs, besides Unity Mod Manager (0.27.3 or later):
 | Custom Car Loader | 3.1.10 | [Nexus Mods](https://www.nexusmods.com/derailvalley/mods/324) |
 | DV Language Helper (Custom Car Loader needs it) | 1.2.1 | with Custom Car Loader |
 | 1500 V DC catenary | 2.5.3 | [Knsgf/Derail_Valley_electric_concept](https://github.com/Knsgf/Derail_Valley_electric_concept) |
-| Custom Car Loader Catenary Support | 1.0.0 | [Knsgf/CCL-OCS](https://github.com/Knsgf/CCL-OCS/releases/tag/v1.0.0) |
+| Custom Car Loader Catenary Support (`CatenaryForCCL.zip`) | 1.0.0 | [Knsgf/CCL-OCS releases](https://github.com/Knsgf/CCL-OCS/releases/latest) |
 | DV Custom Licenses | 1.1.3 | [WhistleWiz/dv-custom-licenses](https://github.com/WhistleWiz/dv-custom-licenses/releases) |
 
 Put both folders of the release, `EU07` and `EU07Electrics`, into the game's `Mods` folder. The
