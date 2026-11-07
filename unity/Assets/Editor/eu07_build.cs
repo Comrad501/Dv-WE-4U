@@ -180,6 +180,7 @@ public static class eu07_build
         }
         else
             edit_prefab($"{target}/EU07_interactables.prefab", shape_desk);
+        parts_skinnable();
 
         CustomCarType    type   = AssetDatabase.LoadAssetAtPath<CustomCarType>($"{target}/EU07_cartype.asset");
         CustomCarVariant livery = AssetDatabase.LoadAssetAtPath<CustomCarVariant>($"{target}/EU07_livery.asset");
@@ -279,7 +280,7 @@ public static class eu07_build
             text(o, "PackId", "EU07");
             text(o, "PackName", desk_v2 ? display_name + " (EU07, indev)" : display_name + " (EU07, indev, old desk)");
             text(o, "Author", "Comrad_501");
-            text(o, "Version", "0.2.0");
+            text(o, "Version", "0.2.1");
             o.FindProperty("Cars.Array.data[0]").objectReferenceValue = type;
         });
         AssetDatabase.SaveAssets();
@@ -3101,6 +3102,45 @@ public static class eu07_build
             made.SetFloat("_OcclusionStrength", 1.0f);
         }
         EditorUtility.SetDirty(made);
+    }
+
+    // SKINNABLE PARTS: Skin Manager swaps textures by name, so a colour-only material can't be skinned.
+    // each gets its own 4x4 picture of its colour (EU07_part_<material>), colour white: looks the same
+    // not: glass, lenses, lit lamps (emissive), see-through, contacts (heat tint is absolute), paint atlases
+    private static readonly string[] not_skinned = { "glass", "lens", "visor", "glow", "bulb", "_lit", "contact" };
+
+    private static void parts_skinnable()
+    {
+        int made = 0;
+        foreach (string id in AssetDatabase.FindAssets("t:Material", new[] { target }))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(id);
+            Material part = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (part == null || part.shader == null || part.shader.name != "Standard" || part.mainTexture != null
+                || part.IsKeywordEnabled("_EMISSION") || part.renderQueue >= 2450
+                || not_skinned.Any(word => part.name.IndexOf(word, StringComparison.OrdinalIgnoreCase) >= 0))
+                continue;
+            string name = "EU07_part_" + (part.name.StartsWith("EU07_") ? part.name.Substring(5) : part.name);
+            string picture = $"{target}/{name}.png";
+            Color32 colour = part.color;
+            colour.a = 255;
+            Texture2D solid = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            solid.SetPixels32(Enumerable.Repeat(colour, 16).ToArray());
+            File.WriteAllBytes(Path.Combine(Application.dataPath, "_CCL_CARS/EU07/" + name + ".png"), solid.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(solid);
+            AssetDatabase.ImportAsset(picture, ImportAssetOptions.ForceSynchronousImport);
+            TextureImporter importer = (TextureImporter) AssetImporter.GetAtPath(picture) ?? throw new IOException("no picture at " + picture);
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.mipmapEnabled = false;
+            importer.sRGBTexture = true;
+            importer.SaveAndReimport();
+            part.mainTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(picture) ?? throw new IOException("no picture at " + picture);
+            part.color = new Color(1.0f, 1.0f, 1.0f, part.color.a);
+            EditorUtility.SetDirty(part);
+            ++made;
+        }
+        AssetDatabase.SaveAssets();
+        Debug.Log($"EU07 BUILD: skinnable parts: {made} colour materials given their own picture (EU07_part_*)");
     }
 
     private static Material material(string name, Color colour)

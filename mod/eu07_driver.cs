@@ -538,6 +538,7 @@ internal class eu07_driver: MonoBehaviour
         Main.log($"EU07 {car.ID}: the works' number on {eu07_works_plates.number(car)} plate(s)");
         eu07_wreck.attach(car);
         eu07_manual.attach(car);
+        eu07_desk_skin.attach(car);
         found.Clear();
         foreach (Fuse? fuse in car.SimController.SimulationFlow.AllFuses)
         {
@@ -1149,11 +1150,66 @@ internal class eu07_driver: MonoBehaviour
                 DV.Customization.Paint.TrainCarPaint? outside = words.Length == 3 && words[2] == "inside" ? _car.PaintInterior : _car.PaintExterior;
                 if (outside == null)
                     return "this car has no paint to change";
-                if (words.Length < 2 || !DV.Customization.Paint.PaintTheme.TryLoad(words[1], out DV.Customization.Paint.PaintTheme theme) || theme == null)
-                    return $"paint <theme> [inside]: it is {_car.PaintExterior?.CurrentTheme?.AssetName} outside, {_car.PaintInterior?.CurrentTheme?.AssetName} inside";
+                DV.Customization.Paint.PaintTheme? theme = null;
+                if (words.Length >= 2 && (!DV.Customization.Paint.PaintTheme.TryLoad(words[1], out theme) || theme == null))
+                    theme = Resources.FindObjectsOfTypeAll<DV.Customization.Paint.PaintTheme>().FirstOrDefault(one => one.name == words[1]);   // Skin Manager's themes are not in Resources
+                if (theme == null)
+                    return $"paint <theme> [inside]: it is {_car.PaintExterior?.CurrentTheme?.AssetName} outside, {_car.PaintInterior?.CurrentTheme?.AssetName} inside; themes loaded: {string.Join(" ", Resources.FindObjectsOfTypeAll<DV.Customization.Paint.PaintTheme>().Select(one => one.name).Distinct())}";
                 bool takes = outside.IsSupported(theme);
                 outside.CurrentTheme = theme;
                 return $"paint {theme.AssetName} (offered for this car: {takes}); the body wears {_painted_body?.sharedMaterial?.name}";
+            }
+            case "skinaudit":
+            {
+                // skinaudit: every renderer, material and texture slot of this car -> debug/skin_audit.csv
+                StringBuilder rows = new("area,renderer,material,slot,texture,size,colour\n");
+                int count = 0;
+                void audit(string area, GameObject? root)
+                {
+                    if (root == null)
+                        return;
+                    foreach (Renderer part in root.GetComponentsInChildren<Renderer>(true))
+                    {
+                        string path = part.name;
+                        for (Transform up = part.transform.parent; up != null && up != root.transform; up = up.parent)
+                            path = up.name + "/" + path;
+                        foreach (Material material in part.sharedMaterials)
+                        {
+                            if (material == null)
+                                continue;
+                            ++count;
+                            string colour = material.HasProperty("_Color") ? ColorUtility.ToHtmlStringRGB(material.color) : "";
+                            bool any = false;
+                            foreach (string slot in material.GetTexturePropertyNames())
+                            {
+                                Texture? texture = material.GetTexture(slot);
+                                if (texture == null)
+                                    continue;
+                                any = true;
+                                rows.Append($"{area},{path},{material.name},{slot},{texture.name},{texture.width}x{texture.height},{colour}\n");
+                            }
+                            if (!any)
+                                rows.Append($"{area},{path},{material.name},,(flat colour),,{colour}\n");
+                        }
+                    }
+                }
+                GameObject? fittings = _car.loadedExternalInteractables;
+                audit("desk", fittings);
+                audit("interior", _car.interior != null ? _car.interior.gameObject : null);
+                audit("body", _car.gameObject);
+                System.IO.File.WriteAllText(System.IO.Path.Combine(eu07_mod.folder, "debug", "skin_audit.csv"), rows.ToString());
+                return $"skin audit: {count} materials on renderers -> debug/skin_audit.csv{(fittings == null ? " (desk not loaded)" : "")}";
+            }
+            case "dials"    :
+            {
+                // dials: every dial face on the desk and the pictures it wears (skin test)
+                GameObject? fittings = _car.loadedExternalInteractables;
+                if (fittings == null)
+                    return "the desk is not loaded (the player is not near)";
+                return string.Join(" | ", fittings.GetComponentsInChildren<Renderer>(true)
+                    .Where(part => part.sharedMaterial != null && part.sharedMaterial.name.StartsWith("EU07_dial_"))
+                    .Select(part => $"{part.name}: {part.sharedMaterial.mainTexture?.name}#{part.sharedMaterial.mainTexture?.GetInstanceID()}" +
+                        (part.sharedMaterial.HasProperty("_EmissionMap") && part.sharedMaterial.GetTexture("_EmissionMap") != null ? $" glow {part.sharedMaterial.GetTexture("_EmissionMap").name}#{part.sharedMaterial.GetTexture("_EmissionMap").GetInstanceID()}" : "")));
             }
             case "fuse"     :
                 if (words.Length != 3 || !_fuses.TryGetValue(words[1], out Fuse fuse))
