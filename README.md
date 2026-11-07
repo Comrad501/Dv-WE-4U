@@ -1,3 +1,4 @@
+# <<Content Disclosure; This mod was made with the help of AI. I am aware of the current geo-politcal situation and how unsupervised GenAI is a problem, but all of this is a hobby project. There is a Polish saying for this; The calculator is as smart as the user.>>
 # WE-4U (EU07) for Derail Valley
 
 A Polish EU07 (303E) electric locomotive for Derail Valley, as the WE-4U: a 1500 V DC machine with the
