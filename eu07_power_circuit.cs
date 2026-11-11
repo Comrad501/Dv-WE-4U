@@ -126,7 +126,7 @@ internal partial class eu07_sim
         public float field_loop_gain_limit { get; set; } = 0.2f;
         // reverse current unmakes the field at once (eu07_traction_motor.unmake_field)
         public bool  field_unmade_by_reversal { get; set; } = true;
-        public float relay_amps            { get; private set; }         // overcurrent relays: greater group, unfiltered
+        public float relay_amps            { get; private set; }         // overcurrent relays: greater group, the current as it flows (filtered)
         public bool  high_start            { get; set; } = false;        // WWR
         public bool  line_contactor_cutout { get; set; } = false;        // PLW, while held
         // hauled switch (jazda ciagniona): control contactor open, towed with battery on, no power
@@ -420,11 +420,19 @@ internal partial class eu07_sim
                 _battery_over = 0.0f;
             }
 
-            // relays: instantaneous current, not the meters
-            float now_12 = Math.Abs(named["MA1"].current), now_34 = Math.Abs(named["MA3"].current);
+            // relays: the motors' current as it flows - the filtered currents, which stand for the
+            // windings' inductance and make the torque, the heat and the meters. NOT the solver's
+            // raw branch current: that is the circuit with no inductance at all, computed a step or
+            // more late on its own thread, and it spikes at every notch, at every slip and regrip,
+            // and backwards at 29 -> 28 before unmake_field answers. In the game those spikes last
+            // longer than the bench's single tick and tripped the relays with the meters at
+            // 500-700 A (a player's report, 2026-11-11, after the three fixes of 2026-10-10).
+            float now_12 = Math.Abs(currents["MA1"]), now_34 = Math.Abs(currents["MA3"]);
             relay_amps = Math.Max(now_12, now_34);
-            pair_amps_12 = now_12;
-            pair_amps_34 = now_34;
+            // the auto-notching for a foreign throttle stays on the raw current it was tuned on:
+            // its spikes make it wait a notch, and on the filtered one it notches into 877 A
+            pair_amps_12 = Math.Abs(named["MA1"].current);
+            pair_amps_34 = Math.Abs(named["MA3"].current);
             bool  over   = now_12 >= overcurrent_high
                         || !high_start_active && (now_12 >= overcurrent_normal || now_34 >= overcurrent_normal);
             _over_time = over && !protection_bypassed ? _over_time + delta_seconds : 0.0f;

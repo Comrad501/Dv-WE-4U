@@ -478,7 +478,7 @@ internal partial class eu07_sim
             if (follows)
                 expect(!power.overcurrent_tripped && power.line_contactors_closed && power.fast_breaker_closed, "the flicker passes: no relay, the contactors stay in");
             else
-                expect(power.overcurrent_tripped, "given the wire as it is, the flicker trips the motors' relays (the fault, kept to show it)");
+                expect(!power.overcurrent_tripped, "given the wire as it is, the flicker still trips nothing: the relays read the current as it flows, not the solver's raw spike");
             rig.km_h = 0.0f;
             power.set_controller(0);
             rig.run(8.0f);
@@ -524,7 +524,7 @@ internal partial class eu07_sim
             if (unmade)
                 expect(!power.overcurrent_tripped && power.contactors.position == 0, "running the wheel back trips nothing");
             else
-                expect(power.overcurrent_tripped, "left to the filter, the motors' relays go (the fault, kept to show it)");
+                expect(!power.overcurrent_tripped, "left to the filter, the relays still hold: they read the current as it flows, not the solver's raw reversal");
             rig.km_h = 0.0f;
             rig.run(8.0f);
             power.reset_relays();
@@ -1126,9 +1126,18 @@ internal partial class eu07_sim
         power.set_reverser(1);
         rig.run(0.2f);
         expect(power.reset_relays() && !power.overcurrent_tripped, "reverser forward, wheel at 0, the button: reset");
+        // the battery breaker (700 A, 0.3 s) may have gone too while the current climbed to the relays' 900 A
+        // (they now read the current as it flows, not the raw spike that tripped them in 60 ms): off and on again resets it
+        if (power.battery_tripped)
+        {
+            power.battery_wanted = false;
+            rig.run(0.2f);
+            power.battery_wanted = true;
+            rig.run(0.5f);
+        }
         power.set_controller(1);
         rig.run(1.0f);
-        expect(power.contactors.position == 1 && power.line_contactors_closed, "and the first notch takes again");
+        expect(power.contactors.position == 1 && power.line_contactors_closed, $"and the first notch takes again (position {power.contactors.position}, line contactors {(power.line_contactors_closed ? "in" : "out")}, overload {(power.overcurrent_tripped ? "OUT" : "in")}, battery breaker {(power.battery_tripped ? "OUT" : "in")}, meters {power.ammeter_12:F0} {power.ammeter_34:F0} A)");
     }
 
     // pantograph air: small compressor from empty, a raising, main reservoir takeover

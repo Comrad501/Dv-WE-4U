@@ -1,4 +1,4 @@
-﻿// EU07 for Derail Valley: builds and exports the vehicle prefab, no editor window needed.
+// EU07 for Derail Valley: builds and exports the vehicle prefab, no editor window needed.
 //   Unity.exe -projectPath <this project> -executeMethod eu07_build.run
 //             -eu07out <folder for the mod> -logFile <log> [-eu07desk v1|v2]
 // -eu07desk: v1 = Knsgf's desk with clones; v2 (default) = 303E desk from primitives (docs/desk/design_desk.md)
@@ -280,7 +280,7 @@ public static class eu07_build
             text(o, "PackId", "EU07");
             text(o, "PackName", desk_v2 ? display_name + " (EU07, indev)" : display_name + " (EU07, indev, old desk)");
             text(o, "Author", "Comrad_501");
-            text(o, "Version", "0.2.1");
+            text(o, "Version", "0.2.2");
             o.FindProperty("Cars.Array.data[0]").objectReferenceValue = type;
         });
         AssetDatabase.SaveAssets();
@@ -475,7 +475,8 @@ public static class eu07_build
         Debug.Log($"EU07 BUILD: {sockets} stray cable sockets of the template switched off");
 
         // GAME GADGETS: TrainCarCustomization needs a power fuse (or gadgets can't mount) + standard readings
-        // fuse set by the mod only (110 V + control breaker); GadgetATS counts on wheel speed; mounts: shape_desk_v2
+        // fuse set by the mod only (110 V + control breaker); GadgetATS counts on wheel speed; mounts: the whole cab
+        // (desk_item_colliders) and the desk's gadget cupboard (shape_desk_v2)
         TrainCarCustomizationProxy gadget_needs = root.GetComponent<TrainCarCustomizationProxy>();
         if (gadget_needs == null)
             gadget_needs = root.AddComponent<TrainCarCustomizationProxy>();
@@ -2758,6 +2759,16 @@ public static class eu07_build
             box.localScale = size;
         }
         Debug.Log($"EU07 BUILD: the desks take items: {made} [items] boxes");
+
+        // GADGETS anywhere in the cab, as on the stock locos: the game copies every [items] collider into its gadget
+        // placing layer (CustomizationPlacementMeshes.TryGenerateInteriorCols); the desk cupboard's boards stay as well
+        CustomizationPlacementMeshesProxy cab_gadgets = root.GetComponent<CustomizationPlacementMeshesProxy>();
+        if (cab_gadgets == null)
+            cab_gadgets = root.AddComponent<CustomizationPlacementMeshesProxy>();
+        cab_gadgets.collisionMeshes = new MeshFilter[0];
+        cab_gadgets.drillDisableMeshes = new MeshFilter[0];
+        cab_gadgets.generateFromTrainInteriorCols = true;
+        EditorUtility.SetDirty(cab_gadgets);
     }
 
     // DESK SKINS: flat piece 0.4 mm over a desk surface; paint_skins paints round what stands on it

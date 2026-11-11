@@ -24,7 +24,7 @@ Needs, besides Unity Mod Manager (0.27.3 or later):
 Put both folders of the release, `EU07` and `EU07Electrics`, into the game's `Mods` folder. The
 locomotive is the **WE-4U** in the game's spawners and shops; it runs under the wire.
 
-Its vigilance device is the game's own: mount one in the cupboard under the desk (the doors open) and
+Its vigilance device is the game's own: mount one anywhere in the cab an item can be set down (the desk, the walls, the cupboards under the desk) and
 the desk's yellow button answers it, or a key: keypad Enter, changed on the mod's page in the mod manager (Ctrl+F10).
 
 ## Known issues
@@ -68,7 +68,7 @@ the desk's yellow button answers it, or a key: keypad Enter, changed on the mod'
 - To the other units of a train it says what the game's locomotives say to one another, a temperature that lights every desk's motor-temperature lamp (steady from 90, blinking from 105): its motors' heat, and "critical" when power is asked of it and it cannot give any - overload relays out, main breaker open, earth fault - unless the hauled-run switch is up; also its starting resistors, warm or red hot.
 - There is NO on-screen panel and there are no hidden keys: what the locomotive has to say, its desk, lamps and gauges say. (A developer gets a status panel, keypad keys and a file-based command hook by making a `debug` folder in the mod's folder; keypad 3 shows the panel.)
 - It is painted: a livery of its own, deep blue with a darker band and pale yellow lines, lettered WE-4U; worn as delivered, and the game's paint cans give it fresh paint, rust, or primer to repaint over. The machine room is shaded and dusted, and its plates and signs say what things are.
-- Vigilance: the game's own device, mounted in the cupboard under the desk, answered from the desk, with its lamp and buzzer in the box on the sill and its own valve and cut-off cock. The SHP train stop is answered the same way and comes with the signalling mod.
+- Vigilance: the game's own device, mounted anywhere in the cab, answered from the desk, with its lamp and buzzer in the box on the sill and its own valve and cut-off cock. The SHP train stop is answered the same way and comes with the signalling mod.
 
 ## The paint
 

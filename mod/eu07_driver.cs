@@ -539,6 +539,7 @@ internal class eu07_driver: MonoBehaviour
         eu07_wreck.attach(car);
         eu07_manual.attach(car);
         eu07_desk_skin.attach(car);
+        eu07_cab_entry.attach(car);
         found.Clear();
         foreach (Fuse? fuse in car.SimController.SimulationFlow.AllFuses)
         {
@@ -1130,6 +1131,16 @@ internal class eu07_driver: MonoBehaviour
                 DV.Interaction.AGrabHandler taken = pointer.RaycastPassThrough(new Ray(from, (to - from).normalized));
                 Collider met = pointer.CurrentlyHit.collider;
                 return $"takes {(taken == null ? "nothing" : taken.name)}; last met {(met == null ? "nothing" : met.name + " (layer " + LayerMask.LayerToName(met.gameObject.layer) + ")")}, of {(to - from).magnitude:F2} m";
+            }
+            case "gadgetcols":
+            {
+                // the game's gadget mounting surfaces in the loaded cab
+                Transform? holder = _car.interior != null ? _car.interior.Find("[GadgetMeshColliders]") : null;
+                if (holder == null)
+                    return "no [GadgetMeshColliders] (interior not loaded?)";
+                Collider[] all = holder.GetComponentsInChildren<Collider>(true);
+                return $"{all.Length} gadget surfaces: {all.Count(one => one.name.StartsWith("[GadgetCollider]"))} from the cab's [items], " +
+                       $"{all.Count(one => one.name.StartsWith("[GadgetMeshCollider]"))} cupboard boards";
             }
             case "air"      : _air.bar = Mathf.Clamp(number, 0.0f, 10.0f); return $"pantograph air at {_air.bar:F1} bar";
             case "low"      : _low.charge = Mathf.Clamp01(number); return $"110 V battery at {_low.charge * 100.0f:F0} %";
