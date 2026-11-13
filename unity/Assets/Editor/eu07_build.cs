@@ -280,7 +280,7 @@ public static class eu07_build
             text(o, "PackId", "EU07");
             text(o, "PackName", desk_v2 ? display_name + " (EU07, indev)" : display_name + " (EU07, indev, old desk)");
             text(o, "Author", "Comrad_501");
-            text(o, "Version", "0.2.2");
+            text(o, "Version", "0.2.3");
             text(o, "Repository", "https://raw.githubusercontent.com/Comrad501/Dv-WE-4U/refs/heads/main/repository.json");
             o.FindProperty("Cars.Array.data[0]").objectReferenceValue = type;
         });
