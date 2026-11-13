@@ -1,0 +1,14 @@
+{
+	"Releases": [
+		{
+			"Id": "EU07",
+			"Version": "0.2.2",
+			"DownloadUrl": "https://github.com/Comrad501/Dv-WE-4U/releases/download/InDev-0.2.2/WE-4U-0.2.2-indev.zip"
+		},
+		{
+			"Id": "EU07Electrics",
+			"Version": "0.2.2",
+			"DownloadUrl": "https://github.com/Comrad501/Dv-WE-4U/releases/download/InDev-0.2.2/WE-4U-0.2.2-indev.zip"
+		}
+	]
+}
