@@ -213,6 +213,7 @@ public static class eu07_build
             // WE-4U-only shared controls: mu_shared
             o.FindProperty("HasMUCable").boolValue = true;
         });
+        make_hud(type, livery);
         // repair cost per part; sum = catalogue price
         type.damage.bodyPrice                 = 45000.0f;
         type.damage.wheelsPrice               = 40000.0f;
@@ -280,7 +281,7 @@ public static class eu07_build
             text(o, "PackId", "EU07");
             text(o, "PackName", desk_v2 ? display_name + " (EU07, indev)" : display_name + " (EU07, indev, old desk)");
             text(o, "Author", "Comrad_501");
-            text(o, "Version", "0.2.3");
+            text(o, "Version", "0.3.0");
             text(o, "Repository", "https://raw.githubusercontent.com/Comrad501/Dv-WE-4U/refs/heads/main/repository.json");
             o.FindProperty("Cars.Array.data[0]").objectReferenceValue = type;
         });
@@ -404,6 +405,46 @@ public static class eu07_build
         TranslationData data = TranslationData.Default(english);
         data.Items.Add(new TranslationItem(DVLanguage.Polish, polish));
         return data;
+    }
+
+    // F4 HUD (0.3.0, the fallback for VR testers): the game shows a loco's HUD only when the loco has an interior
+    // prefab with an InteriorControlsManager. Ours had none (the cab is the external interactables), so an empty
+    // one carries the manager; the mod (eu07_hud.cs) hands it the live cab's own controls, so every HUD click is a
+    // notch of the real handle (never a jump through the controller). Slots without a WE-4U meaning stay off.
+    private static void make_hud(CustomCarType type, CustomCarVariant livery)
+    {
+        GameObject holder = new GameObject("EU07_interior");
+        holder.AddComponent<InteriorControlsManagerProxy>();
+        GameObject interior = PrefabUtility.SaveAsPrefabAsset(holder, $"{target}/EU07_interior.prefab");
+        UnityEngine.Object.DestroyImmediate(holder);
+        set(livery, o => o.FindProperty("interiorPrefab").objectReferenceValue = interior);
+
+        CCL.Types.HUD.VanillaHUDLayout hud = ScriptableObject.CreateInstance<CCL.Types.HUD.VanillaHUDLayout>();
+        hud.HUDType = CCL.Types.HUD.VanillaHUDLayout.BaseHUD.Custom;
+        CCL.Types.HUD.CustomHUDLayout layout = hud.CustomHUDSettings;
+        const CCL.Types.HUD.CustomHUDLayout.ShouldDisplay on = CCL.Types.HUD.CustomHUDLayout.ShouldDisplay.Display;
+        layout.Powertrain = "WE";
+        layout.BasicControls.AmpMeter           = on;                                              // ammeter 1-2
+        layout.BasicControls.Throttle           = CCL.Types.HUD.BasicControls.Slot0B.Throttle;      // the controller wheel, a notch a click
+        layout.BasicControls.TMOrOilTemp        = CCL.Types.HUD.BasicControls.Slot1A.TMTemp;
+        layout.BasicControls.Reverser           = CCL.Types.HUD.BasicControls.Slot1B.Reverser;
+        layout.BasicControls.Speedometer        = on;
+        layout.BasicControls.TurbineOrVoltage   = CCL.Types.HUD.BasicControls.Slot4B.Voltage;       // line voltmeter
+        layout.BasicControls.WheelslipIndicator = on;
+        layout.BasicControls.Sander             = on;
+        layout.SelfLappingBrakeSetup();                                                            // brakeValveType SelfLap
+        layout.Braking.ReleaseCylinder          = CCL.Types.HUD.CustomHUDLayout.ShouldDisplay.None; // no release valve
+        layout.Braking.DynamicBrake             = on;                                              // field weakening lever (eu07_hud.cs)
+        layout.Cab.HornStyle                    = CCL.Types.HUD.Cab.Slot25B.Horn;
+        layout.Mechanical.Alerter               = CCL.Types.HUD.Mechanical.Slot23A.Display;         // vigilance button
+        layout.Mechanical.Pantograph            = on;                                              // front pantograph switch
+        layout.Mechanical.Starter               = on;                                              // fast breaker ON (its key is Starter)
+        layout.Mechanical.FuelCutoff            = on;                                              // fast breaker OFF (key FuelCutoff)
+        layout.Mechanical.StarterFuse           = on;                                              // relay reset (key StarterFuse)
+        layout.Mechanical.ElectricsFuse         = on;                                              // battery switch
+        hud.OnValidate();
+        AssetDatabase.CreateAsset(hud, $"{target}/EU07_hud.asset");
+        set(type, o => o.FindProperty("HUDLayout").objectReferenceValue = hud);
     }
 
     private static void set(UnityEngine.Object asset, Action<SerializedObject> change)
@@ -3364,6 +3405,50 @@ public static class eu07_build
     }
 
     // throws if the component doesn't serialise the field (else setting it silently does nothing)
+    // VR HAND SNAPPERS, as the stock cabs (docs/VR_PLAN.md): on the control itself, where the hand sits when grabbed
+    // line: from the grip's far end back toward the pivot (the line runs along +Y of its start), hand anywhere on it
+    private static void vr_line(GameObject control, Vector3 from, Vector3 to, float min_angle = 0.0f, float max_angle = 360.0f)
+    {
+        GameObject start = node(control.transform, "VR Line", from);
+        start.transform.localRotation = Quaternion.FromToRotation(Vector3.up, (to - from).normalized);
+        CCL.Types.Proxies.Controls.VR.LineHandSnapperProxy snap = control.AddComponent<CCL.Types.Proxies.Controls.VR.LineHandSnapperProxy>();
+        snap.lineStart = start.transform;
+        snap.lineLength = (to - from).magnitude;
+        snap.minAngle = min_angle;
+        snap.maxAngle = max_angle;
+        serialised(snap, "lineStart", "lineLength", "minAngle", "maxAngle");
+    }
+
+    private static void vr_point(GameObject control, Vector3 at)
+    {
+        GameObject marker = node(control.transform, "VR Point", at);
+        CCL.Types.Proxies.Controls.VR.PointHandSnapperProxy snap = control.AddComponent<CCL.Types.Proxies.Controls.VR.PointHandSnapperProxy>();
+        snap.pointMarker = marker.transform;
+        serialised(snap, "pointMarker");
+    }
+
+    // wheel: centre with +Y along the wheel's axis, toward the driver
+    private static void vr_circle(GameObject control, Vector3 centre, Vector3 toward_driver, float radius)
+    {
+        GameObject middle = node(control.transform, "VR Circle", centre);
+        middle.transform.localRotation = Quaternion.FromToRotation(Vector3.up, toward_driver.normalized);
+        CCL.Types.Proxies.Controls.VR.CircleHandSnapperProxy snap = control.AddComponent<CCL.Types.Proxies.Controls.VR.CircleHandSnapperProxy>();
+        snap.centerUpward = middle.transform;
+        snap.radius = radius;
+        serialised(snap, "centerUpward", "radius");
+    }
+
+    // VR hands can't touch a control through a shut door (stock: the breakers in the DH4 and DE6 boxes)
+    private static void vr_behind_door(GameObject control, GameObject door, float closed_value)
+    {
+        CCL.Types.Proxies.Controls.VR.DoorClosedVRTouchDisableProxy guard = control.AddComponent<CCL.Types.Proxies.Controls.VR.DoorClosedVRTouchDisableProxy>();
+        guard.door = door;
+        guard.closedValue = closed_value;
+        guard.threshold = 0.1f;
+        guard.offWhenClosed = true;
+        serialised(guard, "door", "closedValue", "threshold", "offWhenClosed");
+    }
+
     private static void serialised(UnityEngine.Object component, params string[] fields)
     {
         SerializedObject serialized = new SerializedObject(component);
@@ -3540,6 +3625,9 @@ public static class eu07_build
         lever.jointLimitMin = -horn_throw;
         lever.jointLimitMax =  horn_throw;
         serialised(lever, "interactionPoint", "useSteppedJoint", "steppedValueUpdate", "scrollWheelHoverScroll", "jointAxis", "jointLimitMin", "jointLimitMax", "useSpring");
+        // VR: pinched at the knob, as the DE2 and DM3 horns
+        lever.handPosesOverride = new InteractionHandPosesProxy { grabPose = InteractionHandPosesProxy.DVHandPoseState.Pinch };
+        vr_point(control, new Vector3(0.0f, 0.0f, -(reach - 0.012f)));
         feed(control, "hornControl.EXT_IN");
         MouseScrollKeyboardInputProxy scroll = control.AddComponent<MouseScrollKeyboardInputProxy>();
         scroll.scrollAction = new AKeyboardInputProxy.ActionReference("HornIncremental");
@@ -3605,11 +3693,13 @@ public static class eu07_build
 
         // breakers: two rows of five pairs, 40 mm per pair, spare pole at far row end
         const float first = -0.4875f, pitch = 0.040f, far_row = 0.436f, near_row = 0.339f;
+        // everything under the lid, for the VR guard once the lid is made
+        List<GameObject> under_lid = new List<GameObject> { child(battery, "C_MainFuse").gameObject, heating };
         for (int index = 0; index < 5; ++index)
         {
-            make_breaker(top, "BreakerFar" + index , new Vector2(first + pitch * index, far_row ), breakers_far[index].fuse , breakers_far[index].label , null);
-            make_breaker(top, "BreakerNear" + index, new Vector2(first + pitch * index, near_row), breakers_near[index].fuse, breakers_near[index].label,
-                breakers_near[index].fuse == "fusebox.TM_POWER" ? "TractionMotorFuse" : null);
+            under_lid.Add(make_breaker(top, "BreakerFar" + index , new Vector2(first + pitch * index, far_row ), breakers_far[index].fuse , breakers_far[index].label , null));
+            under_lid.Add(make_breaker(top, "BreakerNear" + index, new Vector2(first + pitch * index, near_row), breakers_near[index].fuse, breakers_near[index].label,
+                breakers_near[index].fuse == "fusebox.TM_POWER" ? "TractionMotorFuse" : null));
         }
         Transform spare = node(top, "BreakerSpare", new Vector3(first + pitch * 4.0f + 0.031f, far_row, breaker_plate)).transform;
         breaker_pole(spare, 0.0f, false);
@@ -3664,6 +3754,9 @@ public static class eu07_build
         control.AddComponent<OpenableControlProxy>().closedAtZero = true;
         sounds(lever, ("limitHit", "ItemCollision_MetalSheet_03"));
         lever.OnValidate();
+        // VR: no touching the switches through the shut lid (shut = 0)
+        foreach (GameObject inside in under_lid)
+            vr_behind_door(inside, control, 0.0f);
     }
 
     // one breaker pole through the cover plate: light grey nose 17.4 x 44 mm, dark window, optional lever
@@ -3679,7 +3772,7 @@ public static class eu07_build
     }
 
     // 2-pole 110 V breaker: toggle feeding a DV fuse, and following it
-    private static void make_breaker(Transform panel, string name, Vector2 at, string fuse, string label, string key)
+    private static GameObject make_breaker(Transform panel, string name, Vector2 at, string fuse, string label, string key)
     {
         Transform root = node(panel, name, new Vector3(at.x, at.y, breaker_plate)).transform;
         const float pole = 0.009f, hub_out = 0.0045f;
@@ -3715,6 +3808,7 @@ public static class eu07_build
         sounds(toggle, ("toggle", "Switch_05_Solid"));
         toggle.OnValidate();
         make_label(root, new Vector3(0.0f, -0.0495f, -0.0012f), label, 0.55f);
+        return control;
     }
 
     // ISOLATOR DOOR: sheet leaf, hinged away from the cab, swings into the passage; notched lever, no static area
@@ -3884,6 +3978,8 @@ public static class eu07_build
         solid(control.transform, "Grip", PrimitiveType.Sphere, black, new Vector3(length, 0.0f, -0.007f), Vector3.one * 0.024f, Quaternion.identity, false);
         LeverProxy lever = swing(control, grip, new Vector3(length, 0.0f, -0.012f), new Vector3(0.0f, 0.0f, 1.0f), -90.0f, 0.0f,
             sphere_area(root, name, new Vector3(length * 0.5f, 0.0f, -0.010f), 0.045f));
+        // VR: the last 4 cm of the bar, as the stock brake isolation valves
+        vr_line(control, new Vector3(length, 0.0f, -0.007f), new Vector3(length - 0.04f, 0.0f, -0.007f));
         feed(control, port);
         lever.OnValidate();
         if (label != null)
@@ -3960,6 +4056,8 @@ public static class eu07_build
         LeverProxy lever = swing(control, grip, tie_at + new Vector3(0.0f, 0.0f, -0.062f), across ? Vector3.up : Vector3.left, 0.0f, opens,
             sphere_area(root, name, along * (length * 0.6f) + beside * middle + new Vector3(0.0f, 0.0f, -proud - 0.035f), 0.055f),
             "Switch_08_Electric", "Switch_10_Solid");
+        // VR: hand on the stem, from the grip ball back to the tie bar
+        vr_line(control, tie_at + new Vector3(0.0f, 0.0f, -0.062f), tie_at + new Vector3(0.0f, 0.0f, -0.010f));
         feed(control, port);
         lever.OnValidate();
         make_label(root, label_at, label, control_caption);
@@ -3992,6 +4090,8 @@ public static class eu07_build
 
         LeverProxy lever = swing(control, grip, new Vector3(length, 0.0f, -0.012f), new Vector3(0.0f, 0.0f, 1.0f), -turns, turns,
             sphere_area(root, name, new Vector3(length * 0.5f, 0.0f, -boss_out - 0.010f), 0.045f));
+        // VR: the last 4 cm of the bar, as the stock brake isolation valves
+        vr_line(control, new Vector3(length, 0.0f, -0.007f), new Vector3(length - 0.04f, 0.0f, -0.007f));
         feed(control, port);
         lever.OnValidate();
         make_label(root, dial > 0.0f ? new Vector3(0.0f, -dial - 0.018f, 0.002f) : new Vector3(-0.078f, 0.0f, -0.002f), label, control_caption);
@@ -4747,6 +4847,13 @@ public static class eu07_build
         lever.jointLimitMin = from;
         lever.jointLimitMax = to;
         serialised(lever, "interactionPoint", "useSteppedJoint", "steppedValueUpdate", "notches", "jointAxis", "jointLimitMin", "jointLimitMax");
+        // VR: hand along the handle's long axis, from its far end, 6-12 cm (stock driving levers 8-12)
+        int long_axis = handle_size.x >= handle_size.y && handle_size.x >= handle_size.z ? 0 : handle_size.y >= handle_size.z ? 1 : 2;
+        Vector3 along = Vector3.zero;
+        along[long_axis] = Mathf.Sign(handle_centre[long_axis]) == 0.0f ? 1.0f : Mathf.Sign(handle_centre[long_axis]);
+        float grip_length = Mathf.Clamp(handle_size[long_axis], 0.06f, 0.12f);
+        Vector3 far_end = handle_centre + along * (handle_size[long_axis] * 0.5f);
+        vr_line(control, far_end, far_end - along * grip_length);
         feed(control, port);
         if (names != null)
             control.AddComponent<NotchedControlCustomNamesProxy>().customNames = names;
@@ -4821,6 +4928,8 @@ public static class eu07_build
         serialised(lever, "interactionPoint", "rigidbodyMass", "rigidbodyDrag", "scrollWheelHoverScroll", "useSteppedJoint",
             "steppedValueUpdate", "notches", "jointAxis", "useSpring", "jointSpring", "jointDamper", "useLimits",
             "jointLimitMin", "jointLimitMax", "invertDirection");
+        // VR: hands on the rim, as the stock handbrake wheels (wheel built in local XZ, driver above +Y)
+        vr_circle(control, Vector3.zero, Vector3.up, radius);
         feed(control, port);
         control.AddComponent<NotchedControlNumberedNamesProxy>();
 

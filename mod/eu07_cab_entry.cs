@@ -73,7 +73,14 @@ internal static class eu07_cab_entry
         box.isTrigger = true;
         box.center = centre;
         box.size = box_max - box_min;
+        // VR, as every stock [cab]: grabs reach the controls through the trigger box
+        go.AddComponent<DV.Interaction.GrabberRaycastPassThrough>();
         CabTeleportDestination destination = go.AddComponent<CabTeleportDestination>();
+        // VR room-scale players land on the cab's centreline (stock: same spot, x = 0); seated ones at the stand
+        GameObject roomscale = new GameObject("roomscale position");
+        roomscale.transform.SetParent(go.transform, false);
+        roomscale.transform.localPosition = new Vector3(-stand_a.x, 0.0f, 0.0f);
+        destination.roomscaleTeleportPosition = roomscale.transform;
         // the characteristic glow: the stock cab's own highlight, copied to the middle of the window band
         if (_stock_highlight != null)
         {

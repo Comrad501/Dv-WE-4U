@@ -1240,6 +1240,25 @@ internal class eu07_driver: MonoBehaviour
                     return "no scrollable control " + words[1];
                 StartCoroutine(taps(scrollable, (int) number));
                 return $"scrolling {words[1]} by {(int) number}";
+            case "hud"      :
+            {
+                // hud <ControlType> <notches>: what an F4 HUD click does (eu07_hud.cs): Move on the game's control, else the manager's scroll
+                if (words.Length != 3 || !Enum.TryParse(words[1], true, out DV.HUD.InteriorControlsManager.ControlType type))
+                    return "hud <ControlType> <notches>";
+                DV.HUD.InteriorControlsManager? manager = _car.loadedInterior != null ? _car.loadedInterior.GetComponent<DV.HUD.InteriorControlsManager>() : null;
+                if (manager == null)
+                    return "no interior controls manager (the interior is not loaded)";
+                if (!manager.TryGetControl(type, out DV.HUD.InteriorControlsManager.ControlReference handle) || handle.controlImplBase == null)
+                    return $"the HUD has no {type} control";
+                float before = handle.controlImplBase.Value;
+                DV.Simulation.Controllers.OverridableBaseControl? game = _car.SimController != null && _car.SimController.controlsOverrider != null
+                    ? _car.SimController.controlsOverrider.GetControl(type) : null;
+                if (game != null)
+                    game.Move(number);
+                else
+                    manager.MoveScrollable(type, (int) number);
+                return $"HUD {type} {(game != null ? "Move" : "scroll")} {number}: {handle.controlImplBase.name} {before:F3} -> {handle.controlImplBase.Value:F3}, throttle port {read(port_throttle):F3}";
+            }
             case "stand"    :
             {
                 // stand <right> <up> <forward> <yaw>: player at that spot, car frame (m from middle, from rail)
@@ -1826,6 +1845,11 @@ internal class eu07_driver: MonoBehaviour
     void Update()
     {
         eu07_sim.power_circuit? power = _power;
+        if (_car != null)
+        {
+            eu07_vr_log.watch(_car);    // VR only: testers' log of controls grabbed and used
+            eu07_hud.step(_car, _live_cab);    // F4 HUD: the live desk's controls
+        }
         if (power != null && _car != null)
             watch_doors();
         if (power != null && _car != null)
