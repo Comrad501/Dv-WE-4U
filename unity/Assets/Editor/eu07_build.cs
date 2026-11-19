@@ -281,7 +281,7 @@ public static class eu07_build
             text(o, "PackId", "EU07");
             text(o, "PackName", desk_v2 ? display_name + " (EU07, indev)" : display_name + " (EU07, indev, old desk)");
             text(o, "Author", "Comrad_501");
-            text(o, "Version", "0.3.0");
+            text(o, "Version", "0.3.1");
             text(o, "Repository", "https://raw.githubusercontent.com/Comrad501/Dv-WE-4U/refs/heads/main/repository.json");
             o.FindProperty("Cars.Array.data[0]").objectReferenceValue = type;
         });
@@ -730,6 +730,9 @@ public static class eu07_build
             ladder.AddComponent<BoxCollider>().size = new Vector3(0.50f, 2.30f, 0.34f);
             ladder.AddComponent<Ladder>();
         }
+        // the game wants an "[interior LOD]" beside an interior prefab (the F4 HUD's, make_hud), or logs an error on every
+        // spawn (TrainCar: "no [interior LOD] child"); ours has nothing to stand in for, so it is empty
+        new GameObject("[interior LOD]").transform.SetParent(top, false);
         // cab sound trigger per cab: DV damps outside sounds when the camera is inside
         foreach (float end in new[] { 1.0f, -1.0f })
         {
@@ -2331,7 +2334,7 @@ public static class eu07_build
         desk_part(desk, "Boss", placed("Boss", new Vector3(key_at.x, ped_top, key_at.z)));
         GameObject reverser = make_lever(desk, "Reverser", key_at,
             new Vector3(0.095f, 0.0f, 0.0f), new Vector3(0.15f, 0.012f, 0.030f), new Vector3(0.15f, 0.0f, 0.0f),
-            Vector3.down, -25.0f, 25.0f, 3, "reverser.CONTROL_EXT_IN", "ReverserIncremental", "ReverserAbsolute", directions, null, 0.0f, true);
+            Vector3.down, -25.0f, 25.0f, 3, "reverser.CONTROL_EXT_IN", "ReverserIncremental", "ReverserAbsolute", directions, null, 0.0f, true, feel_reverser);
         desk_part(reverser.transform, "ReverserKey", Vector3.zero);
 
         // DRIVER'S BRAKE VALVE, Oerlikon FV4a, right of pedestal; handle swings flat 27 mm over the rim (passes over the wheel)
@@ -3624,6 +3627,7 @@ public static class eu07_build
         lever.useLimits = true;
         lever.jointLimitMin = -horn_throw;
         lever.jointLimitMax =  horn_throw;
+        feel(lever, feel_horn);
         serialised(lever, "interactionPoint", "useSteppedJoint", "steppedValueUpdate", "scrollWheelHoverScroll", "jointAxis", "jointLimitMin", "jointLimitMax", "useSpring");
         // VR: pinched at the knob, as the DE2 and DM3 horns
         lever.handPosesOverride = new InteractionHandPosesProxy { grabPose = InteractionHandPosesProxy.DVHandPoseState.Pinch };
@@ -3987,8 +3991,9 @@ public static class eu07_build
     }
 
     // SHOVED HANDLE: DV lever with two stops, dragged against a spring, stays where put
+    // (cocks feel as the stock brake isolation valve; knife switches pass feel_knife)
     private static LeverProxy swing(GameObject control, GameObject grip, Vector3 held_at, Vector3 axis, float from, float to, StaticInteractionAreaProxy area,
-        string notch_sound = "LeverNotch_01_Deep", string limit_sound = "LeverNotch_07_Deep")
+        string notch_sound = "LeverNotch_01_Deep", string limit_sound = "LeverNotch_07_Deep", (float mass, float drag, float spring, float damper)? how = null)
     {
         GameObject point = node(control.transform, "Interaction Point", held_at);
         point.transform.localRotation = new Quaternion(1.0f, 0.0f, 0.0f, 0.0f);
@@ -4009,6 +4014,7 @@ public static class eu07_build
         lever.useLimits = true;
         lever.jointLimitMin = from;
         lever.jointLimitMax = to;
+        feel(lever, how ?? feel_cock);
         serialised(lever, "interactionPoint", "useSteppedJoint", "steppedValueUpdate", "notches", "jointAxis", "jointLimitMin", "jointLimitMax", "useSpring");
         control.AddComponent<NotchedControlNumberedNamesProxy>();
         sounds(lever, ("notch", notch_sound), ("limitHit", limit_sound));
@@ -4055,7 +4061,7 @@ public static class eu07_build
         // sound: DV's big breaker (C_BreakerElectrics, Switch_08_Electric) on travel; small breaker click at the stop
         LeverProxy lever = swing(control, grip, tie_at + new Vector3(0.0f, 0.0f, -0.062f), across ? Vector3.up : Vector3.left, 0.0f, opens,
             sphere_area(root, name, along * (length * 0.6f) + beside * middle + new Vector3(0.0f, 0.0f, -proud - 0.035f), 0.055f),
-            "Switch_08_Electric", "Switch_10_Solid");
+            "Switch_08_Electric", "Switch_10_Solid", feel_knife);
         // VR: hand on the stem, from the grip ball back to the tie bar
         vr_line(control, tie_at + new Vector3(0.0f, 0.0f, -0.062f), tie_at + new Vector3(0.0f, 0.0f, -0.010f));
         feed(control, port);
@@ -4804,9 +4810,29 @@ public static class eu07_build
     private static readonly string[] cab_b_own = { "cupboardLeft", "cupboardMiddle", "cupboardRight", "instrumentLight", "cabCutout" };
 
     // lever (his Throttle / Reverser, axis a parameter), desk frame; notched value = notch / (notches - 1)
+    // HOW A HANDLE FEELS in VR: the game drags a grabbed lever through its rigidbody, against the joint spring that pulls
+    // it to the nearest notch, so these decide how hard it is to move by hand. Copied from the stock cabs
+    // (LocoDE2/DE6/DM3_Interior), not tuned by feel: 0.3.0's 15 / 400 / 20 everywhere was 4x to 80x stiffer than stock,
+    // and the VR tester could barely move the reverser and brakes and not at all the cocks and knife switches
+    private static readonly (float mass, float drag, float spring, float damper)
+        feel_handle   = (30.0f, 8.0f, 100.0f, 10.0f),     // DE6 train and independent brake, throttle, dynamic brake
+        feel_reverser = (30.0f, 3.0f, 15.0f, 1.0f),       // DE6 reverser
+        feel_horn     = (30.0f, 0.0f, 20.0f, 1.0f),       // DM3 horn (pinched at the knob, as ours)
+        feel_cock     = (10.0f, 1.0f, 5.0f, 0.35f),       // DE2/DM3 brake isolation valve
+        feel_knife    = (5.0f, 6.0f, 6.0f, 1.0f);         // DE6 electrics knife breaker
+
+    private static void feel(LeverProxy lever, (float mass, float drag, float spring, float damper) how)
+    {
+        lever.rigidbodyMass = how.mass;
+        lever.rigidbodyDrag = how.drag;
+        lever.jointSpring = how.spring;
+        lever.jointDamper = how.damper;
+    }
+
     private static GameObject make_lever(Transform desk, string name, Vector3 pivot, Vector3 handle_centre,
         Vector3 handle_size, Vector3 grip, Vector3 axis, float from, float to, int notches,
-        string port, string scroll_key, string absolute_key, string[] names, Material handle_material = null, float reach = 0.0f, bool bare = false)
+        string port, string scroll_key, string absolute_key, string[] names, Material handle_material = null, float reach = 0.0f, bool bare = false,
+        (float mass, float drag, float spring, float damper)? how = null)
     {
         Transform root = node(desk, name, pivot).transform;
         GameObject control = node(root, "C_" + name, Vector3.zero);
@@ -4846,6 +4872,7 @@ public static class eu07_build
         lever.useLimits = true;
         lever.jointLimitMin = from;
         lever.jointLimitMax = to;
+        feel(lever, how ?? feel_handle);
         serialised(lever, "interactionPoint", "useSteppedJoint", "steppedValueUpdate", "notches", "jointAxis", "jointLimitMin", "jointLimitMax");
         // VR: hand along the handle's long axis, from its far end, 6-12 cm (stock driving levers 8-12)
         int long_axis = handle_size.x >= handle_size.y && handle_size.x >= handle_size.z ? 0 : handle_size.y >= handle_size.z ? 1 : 2;
@@ -4925,6 +4952,7 @@ public static class eu07_build
         lever.jointLimitMin = -controller_sweep;
         lever.jointLimitMax =  controller_sweep;
         lever.invertDirection = false;
+        feel(lever, feel_handle);    // as the DE6 throttle (was mass 5, drag 15, spring 400: stiff in VR)
         serialised(lever, "interactionPoint", "rigidbodyMass", "rigidbodyDrag", "scrollWheelHoverScroll", "useSteppedJoint",
             "steppedValueUpdate", "notches", "jointAxis", "useSpring", "jointSpring", "jointDamper", "useLimits",
             "jointLimitMin", "jointLimitMax", "invertDirection");

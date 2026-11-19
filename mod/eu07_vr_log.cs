@@ -7,17 +7,18 @@ namespace electric_sim;
 
 internal static class eu07_vr_log
 {
-    // one hook per interior instance (DV builds the interior again when the player comes back near)
-    private static readonly ConditionalWeakTable<Transform, object> _hooked = new ConditionalWeakTable<Transform, object>();
+    // one hook per desk instance (DV builds it again when the player comes back near). The cab's controls are the
+    // external interactables, not the interior: the interior is the F4 HUD's empty holder (eu07_hud.cs), no controls
+    private static readonly ConditionalWeakTable<GameObject, object> _hooked = new ConditionalWeakTable<GameObject, object>();
 
     public static void watch(TrainCar car)
     {
-        Transform? interior = car.interior;
-        if (interior == null || !VRManager.IsVREnabled() || _hooked.TryGetValue(interior, out _))
+        GameObject? desk = car.loadedExternalInteractables;
+        if (desk == null || !VRManager.IsVREnabled() || _hooked.TryGetValue(desk, out _))
             return;
-        _hooked.Add(interior, new object());
+        _hooked.Add(desk, new object());
         int count = 0;
-        foreach (DV.CabControls.ControlImplBase control in interior.GetComponentsInChildren<DV.CabControls.ControlImplBase>(true))
+        foreach (DV.CabControls.ControlImplBase control in desk.GetComponentsInChildren<DV.CabControls.ControlImplBase>(true))
         {
             string name = control.name, id = car.ID;
             control.Grabbed += _ => Debug.Log($"EU07 VR {id}: grabbed {name}");

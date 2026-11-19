@@ -914,7 +914,11 @@ internal class eu07_driver: MonoBehaviour
         public Transform[] handles = [];
         public Quaternion[] rest = [];
         public float[] lowers = [];
+        public Collider? stop;      // outside cab doors: the leaf's player-blocking box (eu07_build.cs make_door)
     }
+    // an outside cab door blocks the player only near shut: ajar, its leaf stands over the ladder's top and the
+    // climber is pushed off it and falls through the body (VR tester, 0.3.0); fully open it lies along the side
+    private const float door_blocks_below_degrees = 10.0f;
     private readonly List<door_watch> _doors = [];
     private GameObject? _doors_of;
 
@@ -1800,6 +1804,7 @@ internal class eu07_driver: MonoBehaviour
                     door.rest = door.handles.Select(handle => handle.localRotation).ToArray();
                     // lever toward +x lowers with -z turn; mirrored lever (scale.x < 0) with +z
                     door.lowers = door.handles.Select(handle => handle.Find("Lever") is Transform lever && lever.localScale.x < 0.0f ? 1.0f : -1.0f).ToArray();
+                    door.stop = frame.name.StartsWith("DoorCab") && leaf.Find("Stop") is Transform stop ? stop.GetComponent<Collider>() : null;
                     _doors.Add(door);
                 }
             }
@@ -1809,6 +1814,8 @@ internal class eu07_driver: MonoBehaviour
             if (door.frame == null || door.leaf == null)
                 continue;
             float open = Quaternion.Angle(door.frame.rotation, door.leaf.rotation);
+            if (door.stop != null)
+                door.stop.enabled = open < door_blocks_below_degrees;
             float press = Mathf.SmoothStep(0.0f, 1.0f, Mathf.InverseLerp(0.3f, 2.5f, open)) * (1.0f - Mathf.SmoothStep(0.0f, 1.0f, Mathf.InverseLerp(4.0f, 9.0f, open)));
             for (int index = 0; index < door.handles.Length; ++index)
             {
@@ -1895,6 +1902,19 @@ internal class eu07_driver: MonoBehaviour
             if (_vigilance_button != null && _vigilance_button.IsOn)
                 _vigilance_button.Use();
             _vigilance_key_holds = false;
+        }
+        // SWITCH KEYS (eu07_mod.settings): flip that switch in the live cab, as a hand would
+        if (power != null && player_aboard && _car != null)
+        {
+            foreach ((UnityModManagerNet.KeyBinding key, string port) in new[]
+            {
+                (eu07_mod.settings.pantograph_front, "pantograph2Ask{0}.EXT_IN"), (eu07_mod.settings.pantograph_rear, "pantographAsk{0}.EXT_IN"),
+                (eu07_mod.settings.small_compressor, "smallCompressor.EXT_IN"), (eu07_mod.settings.pantograph_cock, "pantoCock.EXT_IN"),
+            })
+            {
+                if (key_down(key))
+                    eu07_hud.flip(_car, _live_cab, port);
+            }
         }
         if (power == null || !player_aboard || !_developer)
             return;

@@ -71,6 +71,35 @@ internal static class eu07_hud
         }
     }
 
+    // the live cab's own copy of a control, by its port ({0} = A or B; no {0}: the copy nearest the live wheel)
+    private static DV.CabControls.ControlImplBase? control_of(GameObject desk, int cab, string port, InteractablePortFeeder[] feeders)
+    {
+        if (cab < 0)
+            return null;
+        string letter = cab == 0 ? "A" : "B";
+        InteractablePortFeeder? wheel = feeders.FirstOrDefault(one => one.portId == string.Format("throttle{0}.EXT_IN", letter));
+        Vector3 at = wheel != null ? wheel.transform.position : desk.transform.position;
+        string id = string.Format(port, letter);
+        InteractablePortFeeder? nearest = feeders.Where(one => one.portId == id).OrderBy(one => (one.transform.position - at).sqrMagnitude).FirstOrDefault();
+        // the object holding the control itself (the HUD wants that one)
+        return nearest == null ? null : nearest.GetComponent<DV.CabControls.ControlImplBase>() ?? nearest.GetComponentInParent<DV.CabControls.ControlImplBase>();
+    }
+
+    // a switch key (eu07_driver, eu07_mod.settings): flip that two-way control in the live cab, as a hand would
+    public static void flip(TrainCar car, int live_cab, string port)
+    {
+        GameObject? desk = car.loadedExternalInteractables;
+        DV.CabControls.ControlImplBase? control = desk == null ? null
+            : control_of(desk, live_cab == 0 || live_cab == 1 ? live_cab : -1, port, desk.GetComponentsInChildren<InteractablePortFeeder>(true));
+        if (control == null)
+        {
+            Main.release_log($"EU07 {car.ID}: key for {port}: no such switch in a live cab");
+            return;
+        }
+        control.SetValue(control.Value > 0.5f ? 0.0f : 1.0f);
+        Main.release_log($"EU07 {car.ID}: key: {control.name} -> {control.Value:F2}");
+    }
+
     private static void bind(TrainCar car, InteriorControlsManager manager, GameObject desk, int cab)
     {
         // the HUD on this loco now: let go of the old desk first (the HUD unsubscribes by the references it finds)
@@ -85,14 +114,7 @@ internal static class eu07_hud
         Vector3 at = wheel != null ? wheel.transform.position : desk.transform.position;
         GameObject? find(string port)
         {
-            if (cab < 0)
-                return null;
-            string id = string.Format(port, letter);
-            InteractablePortFeeder? nearest = feeders.Where(one => one.portId == id)
-                .OrderBy(one => (one.transform.position - at).sqrMagnitude).FirstOrDefault();
-            // the HUD wants the object holding the control itself
-            DV.CabControls.ControlImplBase? control = nearest == null ? null
-                : nearest.GetComponent<DV.CabControls.ControlImplBase>() ?? nearest.GetComponentInParent<DV.CabControls.ControlImplBase>();
+            DV.CabControls.ControlImplBase? control = control_of(desk, cab, port, feeders);
             return control != null ? control.gameObject : null;
         }
 

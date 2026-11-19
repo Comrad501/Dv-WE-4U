@@ -34,6 +34,17 @@ public class eu07_settings : ModSettings, IDrawable
     [Draw("Vigilance button (answers the vigilance device)")]
     public KeyBinding vigilance = new KeyBinding { keyCode = UnityEngine.KeyCode.KeypadEnter };
 
+    // switches with no game binding, for VR drivers who would rather not reach for them (VR tester, 0.3.0); each press
+    // flips that switch in the cab you drive from. Unset at first: pick your own keys
+    [Draw("Front pantograph (up / down)")]
+    public KeyBinding pantograph_front = new KeyBinding { keyCode = UnityEngine.KeyCode.None };
+    [Draw("Rear pantograph (up / down)")]
+    public KeyBinding pantograph_rear = new KeyBinding { keyCode = UnityEngine.KeyCode.None };
+    [Draw("Small compressor, for pantograph air (on / off)")]
+    public KeyBinding small_compressor = new KeyBinding { keyCode = UnityEngine.KeyCode.None };
+    [Draw("Pantograph three-way cock (main reservoir / small compressor)")]
+    public KeyBinding pantograph_cock = new KeyBinding { keyCode = UnityEngine.KeyCode.None };
+
     public override void Save(ModEntry mod) => Save(this, mod);
 
     public void OnChange()
