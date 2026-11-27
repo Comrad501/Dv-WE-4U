@@ -42,6 +42,7 @@ namespace electric_sim.unit_A;
 internal class eu07_debug: MonoBehaviour
 {
     private static string folder => Path.Combine(eu07_mod.folder, "debug");
+    private const string debug_career = "WE-4U Debug";      // career_kit works in this career session only
     public  static bool   wanted => Directory.Exists(folder);
 
     private readonly List<TrainCar> _spawned = [];
@@ -122,6 +123,38 @@ internal class eu07_debug: MonoBehaviour
             outcome = "could not be mounted: " + problem;
         }
         File.AppendAllText(Path.Combine(folder, "log.txt"), $"{DateTime.Now:HH:mm:ss} gadget {name} -> {outcome}\n");
+    }
+
+    // the pane let go at `speed` along its opening direction (local -y), relative to the car; value, speed against the
+    // car and joint force every 0.1 s for 3 s, then whether it settled on a step
+    private System.Collections.IEnumerator push_window(TrainCar car, DV.CabControls.ControlImplBase pane, float speed)
+    {
+        Rigidbody? body = pane.GetComponent<Rigidbody>();
+        ConfigurableJoint? joint = pane.GetComponent<ConfigurableJoint>();
+        Rigidbody? frame = joint != null ? joint.connectedBody : null;
+        var text = new System.Text.StringBuilder($"{DateTime.Now:HH:mm:ss} window_push {pane.name} {speed:F2} m/s:");
+        if (body == null || joint == null)
+        {
+            File.AppendAllText(Path.Combine(folder, "log.txt"), text + " no rigidbody/joint\n");
+            yield break;
+        }
+        Vector3 ground() => frame != null ? frame.GetPointVelocity(body.position) : Vector3.zero;
+        body.velocity = ground() - pane.transform.up * speed;
+        float last_value = pane.Value;
+        int changes = 0;
+        for (int sample = 0; sample < 30; ++sample)
+        {
+            yield return new WaitForSeconds(0.1f);
+            float relative = Vector3.Dot(body.velocity - ground(), -pane.transform.up);
+            if (Mathf.Abs(pane.Value - last_value) > 0.001f)
+                ++changes;
+            last_value = pane.Value;
+            if (sample % 3 == 0)
+                text.Append($"\n  {sample * 0.1f + 0.1f:F1} s: value {pane.Value:F2}, sliding {relative:F3} m/s, force {joint.currentForce.magnitude:F1} N");
+        }
+        float still = Vector3.Dot(body.velocity - ground(), -pane.transform.up);
+        text.Append($"\n  -> {changes} step changes in 3 s; end value {pane.Value:F2}, still sliding {still:F3} m/s: {(Mathf.Abs(still) < 0.01f ? "SETTLED" : "NOT SETTLED")}\n");
+        File.AppendAllText(Path.Combine(folder, "log.txt"), text.ToString());
     }
 
     private string obey(string[] words)
@@ -250,7 +283,12 @@ internal class eu07_debug: MonoBehaviour
             }
             case "spawn":
             {
-                // "spawn ?": liveries with an MU cable
+                // "spawn ?": liveries with an MU cable. "spawn company|owned ...": spawned as a station's loco (billed
+                // through the career manager's loco fees) or as a bought one (owned, its own debt); plain "spawn" is
+                // a player-spawned car the debt system never tracks
+                string spawn_as = words.Length > 1 && (words[1] == "company" || words[1] == "owned") ? words[1] : "player";
+                if (spawn_as != "player")
+                    words = words.Where((_, index) => index != 1).ToArray();
                 string wanted_livery = eu07_mod.livery_prefix;
                 int offset_at = 1;
                 if (words.Length > 1 && !float.TryParse(words[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
@@ -270,11 +308,11 @@ internal class eu07_debug: MonoBehaviour
                 if (words.Length == offset_at + 2 && float.TryParse(words[offset_at], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float east)
                                                   && float.TryParse(words[offset_at + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float north))
                     where += new Vector3(east, 0.0f, north);
-                TrainCar car = CarSpawner.Instance.SpawnCarOnClosestTrack(where, livery, flipRotation: false, playerSpawnedCar: true, uniqueCar: false);
+                TrainCar car = CarSpawner.Instance.SpawnCarOnClosestTrack(where, livery, flipRotation: false, playerSpawnedCar: spawn_as != "company", uniqueCar: spawn_as == "owned");
                 if (car == null)
                     return "the spawner gave nothing";
                 _spawned.Add(car);
-                return $"spawned {car.ID} at {car.transform.position}";
+                return $"spawned {car.ID} ({spawn_as}) at {car.transform.position}";
             }
             case "delete":
             {
@@ -540,6 +578,102 @@ internal class eu07_debug: MonoBehaviour
                     at = new Vector3(right, up, forward);
                 StartCoroutine(mount(on.car, prefab, words[1], at, yaw));
                 return "mounting " + words[1] + " (the outcome follows in this log)";
+            }
+            case "career_kit":
+            {
+                // DEBUG CAREER ONLY: every general and job licence, every garage, money; then a manual save.
+                // Refuses unless the loaded session is a career named exactly "WE-4U Debug" (never the player's own).
+                DV.Common.IGameSession? session = DV.UserManagement.UserManager.Instance?.CurrentUser?.CurrentSession;
+                if (session == null || session.GameMode != "Career" || session.Name != debug_career)
+                    return $"refused: only in the career session named \"{debug_career}\" (loaded: {session?.GameMode ?? "none"} \"{session?.Name ?? ""}\")";
+                LicenseManager licences = LicenseManager.Instance;
+                int general = 0, jobs = 0, garages = 0;
+                foreach (DV.ThingTypes.GeneralLicenseType_v2 licence in DV.Globals.G.Types.generalLicenses)
+                    if (!licences.IsGeneralLicenseAcquired(licence)) { licences.AcquireGeneralLicense(licence); ++general; }
+                foreach (DV.ThingTypes.JobLicenseType_v2 licence in DV.Globals.G.Types.jobLicenses)
+                    if (!licences.IsJobLicenseAcquired(licence)) { licences.AcquireJobLicense(licence); ++jobs; }
+                foreach (DV.ThingTypes.GarageType_v2 garage in DV.Globals.G.Types.garages)
+                    if (!licences.IsGarageUnlocked(garage)) { licences.UnlockGarage(garage); ++garages; }
+                double money = words.Length > 1 && double.TryParse(words[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double asked) ? asked : 1.0e6;
+                DV.InventorySystem.Inventory.Instance.AddMoney(money);
+                SaveGameManager.Instance.Save(DV.Common.SaveType.Manual);
+                return $"debug career: {general} general licences, {jobs} job licences, {garages} garages added; +{money:F0} money (now {DV.InventorySystem.Inventory.Instance.PlayerMoney:F0}); saved";
+            }
+            case "gadget_needs":
+            {
+                // what the game's TrainCarRequirements check sees (TrainCarCustomizerBase.IsValidTargetSelf)
+                eu07_driver? on = chosen();
+                if (on == null || on.car == null)
+                    return "choose a locomotive first";
+                DV.Customization.TrainCarCustomization? custom = on.car.Customization;
+                if (custom == null)
+                    return "no TrainCarCustomization";
+                object? fuse = typeof(DV.Customization.TrainCarCustomization).GetField("electronicsFuse", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.GetValue(custom);
+                DV.Customization.CustomizationPlacementMeshes? places = on.car.GetComponentInChildren<DV.Customization.CustomizationPlacementMeshes>(true);
+                return $"baseControls {custom.Controls != null} (sim {on.car.SimController != null}, overrider {on.car.SimController?.controlsOverrider != null}); " +
+                       $"electricsFuse {fuse != null}; muSupport {on.car.muModule != null}; cabin {on.car.carLivery.interiorPrefab != null}; " +
+                       $"interior {on.car.interior != null}; placement meshes {(places != null ? places.name : "NONE")}";
+            }
+            case "window":
+            {
+                // window: each sliding side pane, its value, speed, the joint's force (SteppedPuller latches only under
+                // 50 N) and every solid collider its grip box overlaps that its layer collides with (VR hands push it)
+                eu07_driver? subject = chosen();
+                Transform? inside = subject?.car?.interior;
+                if (subject == null || inside == null)
+                    return "choose a WE-4U with its cab loaded";
+                var text = new System.Text.StringBuilder();
+                foreach (DV.CabControls.ControlImplBase pane in inside.GetComponentsInChildren<DV.CabControls.ControlImplBase>(true).Where(control => control.name.StartsWith("C_Window")))
+                {
+                    Rigidbody? body = pane.GetComponent<Rigidbody>();
+                    ConfigurableJoint? joint = pane.GetComponent<ConfigurableJoint>();
+                    text.Append($"\n  {pane.name}: value {pane.Value:F3}, speed {(body != null ? body.velocity.magnitude : 0f):F3} m/s, joint force {(joint != null ? joint.currentForce.magnitude : 0f):F1} N, sleeping {(body != null && body.IsSleeping())}");
+                    foreach (BoxCollider grip in pane.GetComponentsInChildren<BoxCollider>(true))
+                    {
+                        Vector3 half = Vector3.Scale(grip.size * 0.5f, grip.transform.lossyScale);
+                        Collider[] touching = Physics.OverlapBox(grip.transform.TransformPoint(grip.center), half, grip.transform.rotation, ~0, QueryTriggerInteraction.Ignore);
+                        text.Append($"\n    {grip.name} layer {LayerMask.LayerToName(grip.gameObject.layer)} trigger {grip.isTrigger}, {half * 2000f:F0} mm");
+                        foreach (Collider other in touching.Where(other => other != grip && !other.transform.IsChildOf(pane.transform)))
+                        {
+                            bool meets = !Physics.GetIgnoreLayerCollision(grip.gameObject.layer, other.gameObject.layer);
+                            text.Append($"\n      overlaps {other.name} ({other.GetType().Name}, layer {LayerMask.LayerToName(other.gameObject.layer)}, {(meets ? "COLLIDES" : "ignored")}, body {(other.attachedRigidbody != null ? other.attachedRigidbody.name : "none")})");
+                        }
+                    }
+                }
+                return text.Length == 0 ? "no sliding panes in the cab" : text.ToString();
+            }
+            case "rain":
+                return words.Length == 2 ? eu07_rain.force(words[1]) : "rain <0-1> | off";
+            case "rain_probe":
+                return eu07_rain.probe();
+            case "rain_roof":
+                eu07_rain.roof_on = words.Length < 2 || words[1] != "off";
+                return "the roof patch " + (eu07_rain.roof_on ? "on" : "off");
+            case "window_push":
+            case "window_damper":
+            {
+                // window_push <pane> <m/s>: a VR hand letting go while moving (VRTK leaves the pane its speed), traced 3 s
+                // window_damper <N s/m>: a damper on every pane's joint, against its speed relative to the cab
+                eu07_driver? subject = chosen();
+                if (subject?.car?.interior == null || words.Length < 2)
+                    return words[0] == "window_push" ? "window_push <C_WindowLeftA ...> <m/s>, cab loaded" : "window_damper <N s/m>, cab loaded";
+                var panes = subject.car.interior.GetComponentsInChildren<DV.CabControls.ControlImplBase>(true).Where(control => control.name.StartsWith("C_Window")).ToList();
+                if (words[0] == "window_damper")
+                {
+                    float damper = float.Parse(words[1], System.Globalization.CultureInfo.InvariantCulture);
+                    foreach (var pane in panes)
+                    {
+                        ConfigurableJoint? joint = pane.GetComponent<ConfigurableJoint>();
+                        if (joint != null)
+                            joint.yDrive = new JointDrive { positionSpring = 0.0f, positionDamper = damper, maximumForce = float.MaxValue };
+                    }
+                    return $"{panes.Count} panes: joint damper {damper} N s/m";
+                }
+                var named = panes.Find(pane => pane.name == words[1]);
+                if (named == null || words.Length < 3)
+                    return "no pane " + words[1] + "; there are " + string.Join(" ", panes.Select(pane => pane.name));
+                StartCoroutine(push_window(subject.car, named, float.Parse(words[2], System.Globalization.CultureInfo.InvariantCulture)));
+                return $"pushing {named.name}, trace follows";
             }
             case "choose":
             {

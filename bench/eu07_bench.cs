@@ -119,6 +119,22 @@ internal partial class eu07_sim
 
     private static int _failures = 0;
 
+    // Unity's Mathf.SmoothDamp, as DV smooths its slip and wheel RPM
+    private static float smooth_damp(float current, float target, ref float velocity, float smooth_time, float delta)
+    {
+        smooth_time = Math.Max(0.0001f, smooth_time);
+        float omega = 2.0f / smooth_time, x = omega * delta, exp = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
+        float change = current - target, temp = (velocity + omega * change) * delta;
+        velocity = (velocity - omega * temp) * exp;
+        float output = target + (change + temp) * exp;
+        if (target - current > 0.0f == output > target)
+        {
+            output = target;
+            velocity = (output - target) / delta;
+        }
+        return output;
+    }
+
     // standstill amps per group per position (part 2)
     // row-to-row ratio = current gain of a step at any speed (back EMF unchanged)
     private static readonly float[] _standstill_12 = new float[controller_positions], _standstill_34 = new float[controller_positions];
@@ -378,6 +394,149 @@ internal partial class eu07_sim
         power.protection_bypassed = false;
         rig.run(8.0f);
         expect(!power.slip_detected, "gone when the axles agree again");
+
+        // winding back in series at speed (issue #15: earth fault + overload on 27 -> 25 above 30 km/h, reverser forward)
+        Console.WriteLine();
+        Console.WriteLine("winding back in series at speed");
+        power.take_damage();
+        // both cabs: from cab B the reverser is -1 and the wheels turn the other way (the tester drove from B)
+        foreach ((int cab_sign, float speed) in new[] { (1, 35.0f), (1, 50.0f), (-1, 35.0f), (-1, 50.0f) })
+        {
+            rig.wheel_to(0);
+            power.set_reverser(cab_sign);
+            rig.km_h = speed * cab_sign;
+            for (int up = 1; up <= 27; ++up)
+            {
+                rig.wheel_to(up);
+                rig.run(0.3f);
+            }
+            rig.run(2.0f);
+            float on_27 = power.ammeter_12, most = 0.0f, most_stress = 0.0f;
+            for (int back = 26; back >= 20; --back)
+            {
+                power.set_controller(back);
+                for (int tick = 0; tick < 10; ++tick)       // a quick hand: a notch every 0.2 s
+                {
+                    rig.tick();
+                    most = Math.Max(most, Math.Max(power.ammeter_12, power.ammeter_34));
+                    most_stress = Math.Max(most_stress, power.plugging_stress);
+                }
+            }
+            rig.run(1.0f);
+            string cab = cab_sign > 0 ? "cab A" : "cab B";
+            Console.WriteLine($"  {cab}, {speed:F0} km/h: {on_27:F0} A on 27, winding back to 20: most {most:F0} A, plugging {most_stress:F2}, " +
+                $"earth fault {power.earth_fault_tripped}, overcurrent {power.overcurrent_tripped}, flashovers {power.flashovers}");
+            expect(!power.earth_fault_tripped && !power.overcurrent_tripped, $"{cab}, {speed:F0} km/h, 27 back to 20 by hand: no earth fault, no overload");
+            rig.km_h = 0.0f;
+            rig.wheel_to(0);
+            rig.run(8.0f);
+            power.reset_relays();
+            power.set_reverser(1);
+            power.close_fast_breaker();
+        }
+        // #15's cause: in a slip DV pulls the wheel RPM toward sign(torque) * 600 rpm (WheelslipControllerSystem, TractionPortsFeeder),
+        // so a torque at 0 sends the wheels toward a stop, a negative one turns them backwards: on 27 the overload trips
+        foreach (float reverse in new[] { 0.0f, -0.3f })
+        {
+            rig.km_h = 35.0f;
+            for (int up = 1; up <= 27; ++up) { rig.wheel_to(up); rig.run(0.3f); }
+            rig.run(1.0f);
+            int flashes = power.flashovers;
+            float most = 0.0f, stress = 0.0f;
+            rig.km_h = 35.0f * reverse;
+            for (int tick = 0; tick < 15; ++tick) { rig.tick(); most = Math.Max(most, Math.Max(power.ammeter_12, power.ammeter_34)); stress = Math.Max(stress, power.plugging_stress); }
+            rig.km_h = 35.0f;
+            rig.run(1.0f);
+            Console.WriteLine($"  27, 35 km/h, wheels at {reverse:F1} x speed for 0.3 s: most {most:F0} A (relays {power.relay_amps:F0}), plugging {stress:F2}, " +
+                $"overcurrent {power.overcurrent_tripped}, earth fault {power.earth_fault_tripped}, flashovers {power.flashovers - flashes}, arc {power.arc_amps:F0} A");
+            expect(power.overcurrent_tripped, $"wheels at {reverse:F1} x speed for 0.3 s on 27: the overload trips ({power.arc_amps:F0} A broken, as the tester's 932-1418 A)");
+            rig.km_h = 0.0f; rig.wheel_to(0); rig.run(8.0f); power.reset_relays(); power.close_fast_breaker();
+        }
+        // the same, with DV's own slip model in the loop (WheelslipControllerSystem + TractionPortsFeeder, 2026 build):
+        // slip target = clamp((|F|/axles - limit) / limit), slip smoothed 0.5 s up / 0.1 s down; while slipping the wheel
+        // RPM goes to lerp(train, sign(F) x 600, slip), smoothed 0.2 s; F = the torque we write (with running drag) / r
+        foreach ((string what, bool wet, bool wind_back) in new[] { ("wet rail, holding 27", true, false), ("wet rail, winding back", true, true), ("dry rail, winding back", false, true) })
+        {
+            rig.km_h = 35.0f;
+            for (int up = 1; up <= 27; ++up) { rig.wheel_to(up); rig.run(0.3f); }
+            rig.run(1.0f);
+            const float r = 0.625f, max_slip_rpm = 600.0f;
+            float train_rpm = 35.0f / 3.6f / (2.0f * (float) Math.PI * r) * 60.0f;
+            float drag = (12.0f * 35.0f + 0.42f * 35.0f * 35.0f) * r;
+            float limit = wet ? (power.wheel_torque - drag) / r / motors / 1.5f : float.PositiveInfinity;   // wet: 27 overruns adhesion by half
+            float slip = 0.0f, slip_v = 0.0f, rpm = train_rpm, rpm_v = 0.0f, oriented = max_slip_rpm, most = 0.0f, least_rpm = rpm, most_slip = 0.0f;
+            int flashes = power.flashovers, notch = 27;
+            for (int tick = 0; tick < 300 && !power.overcurrent_tripped; ++tick)
+            {
+                if (wind_back && tick >= 75 && tick % 10 == 5 && notch > 20)
+                    power.set_controller(--notch);
+                float force = (power.wheel_torque - drag) / r;
+                float want = float.IsInfinity(limit) ? 0.0f : Math.Min(1.0f, Math.Max(0.0f, (Math.Abs(force) / motors - limit) / limit));
+                oriented = Math.Sign(force) * max_slip_rpm;
+                slip = smooth_damp(slip, want, ref slip_v, want > slip ? 0.5f : 0.1f, bench_tick);
+                rpm = smooth_damp(rpm, train_rpm + (oriented - train_rpm) * slip, ref rpm_v, 0.2f, bench_tick);
+                for (int axle = 0; axle < motors; ++axle)
+                    rig.wheel_RPM[axle].Value = rpm;
+                rig.tick();
+                most = Math.Max(most, Math.Max(power.ammeter_12, power.ammeter_34));
+                least_rpm = Math.Min(least_rpm, rpm);
+                most_slip = Math.Max(most_slip, slip);
+            }
+            Console.WriteLine($"  DV slip model, {what}, 35 km/h: slip up to {most_slip:F2}, wheels down to {least_rpm:F0} rpm (train {train_rpm:F0}), most {most:F0} A, " +
+                $"overcurrent {power.overcurrent_tripped}, flashovers {power.flashovers - flashes}, wheel at {notch}");
+            rig.km_h = 0.0f; rig.wheel_to(0); rig.run(8.0f); power.reset_relays(); power.close_fast_breaker();
+        }
+        // a train brake applied under power (in VR the brake handle sits over the wheel): DV's wheel slide pulls the wheel
+        // RPM toward 0 (TractionPortsFeeder: lerp(train, 0, slide), smoothed 0.2 s); slide rising over 0.3 s or 1 s
+        foreach (float rise in new[] { 0.3f, 1.0f })
+        {
+            rig.km_h = 35.0f;
+            for (int up = 1; up <= 27; ++up) { rig.wheel_to(up); rig.run(0.3f); }
+            rig.run(1.0f);
+            float train_rpm = rig.wheel_RPM[0].Value, rpm = train_rpm, rpm_v = 0.0f, most = 0.0f, slide = 0.0f, at_trip = -1.0f;
+            int flashes = power.flashovers;
+            for (int tick = 0; tick < 150 && !power.overcurrent_tripped; ++tick)
+            {
+                slide = Math.Min(1.0f, slide + bench_tick / rise);
+                rpm = smooth_damp(rpm, train_rpm * (1.0f - slide), ref rpm_v, 0.2f, bench_tick);
+                for (int axle = 0; axle < motors; ++axle)
+                    rig.wheel_RPM[axle].Value = rpm;
+                rig.tick();
+                most = Math.Max(most, Math.Max(power.ammeter_12, power.ammeter_34));
+                if (power.overcurrent_tripped)
+                    at_trip = rpm;
+            }
+            Console.WriteLine($"  brake slide over {rise:F1} s on 27, 35 km/h: most {most:F0} A, overcurrent {power.overcurrent_tripped} (wheels at {at_trip:F0} of {train_rpm:F0} rpm, " +
+                $"slide {slide:F2}), broken {power.arc_amps:F0} A, flashovers {power.flashovers - flashes}");
+            rig.km_h = 0.0f; rig.wheel_to(0); rig.run(8.0f); power.reset_relays(); power.close_fast_breaker();
+        }
+        // a heavy, lightly damped VR wheel can flicker across a notch boundary: every tick for 2 s
+        foreach ((int a, int b) in new[] { (27, 28), (28, 29) })
+        {
+            rig.km_h = 40.0f;
+            for (int up = 1; up <= a; ++up)
+            {
+                rig.wheel_to(up);
+                rig.run(0.3f);
+            }
+            rig.run(1.0f);
+            float most = 0.0f;
+            for (int tick = 0; tick < 100; ++tick)
+            {
+                power.set_controller(tick % 2 == 0 ? b : a);
+                rig.tick();
+                most = Math.Max(most, Math.Max(power.ammeter_12, power.ammeter_34));
+            }
+            rig.run(1.0f);
+            Console.WriteLine($"  40 km/h, wheel flickering {a}<->{b} for 2 s: most {most:F0} A, relays saw {power.relay_amps:F0} A, " +
+                $"earth fault {power.earth_fault_tripped}, overcurrent {power.overcurrent_tripped}, arcs {power.arcs}");
+            expect(!power.earth_fault_tripped && !power.overcurrent_tripped, $"40 km/h, flicker {a}<->{b}: no earth fault, no overload");
+            rig.km_h = 0.0f;
+            rig.wheel_to(0);
+            rig.run(8.0f);
+            power.reset_relays();
+            power.close_fast_breaker();
+        }
 
         // plugging: rolling forward, reverser thrown, power on
         Console.WriteLine();
@@ -1122,7 +1281,7 @@ internal partial class eu07_sim
         rig.run(1.0f);
         power.set_reverser(0);
         rig.run(0.2f);
-        expect(!power.reset_relays(), "the button with the reverser in neutral: nothing");
+        expect(!power.reset_relays() && power.reset_blocked_by == "the reverser is in neutral", $"the button with the reverser in neutral: nothing, and it says why ({power.reset_blocked_by})");
         power.set_reverser(1);
         rig.run(0.2f);
         expect(power.reset_relays() && !power.overcurrent_tripped, "reverser forward, wheel at 0, the button: reset");

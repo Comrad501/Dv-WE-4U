@@ -281,7 +281,7 @@ public static class eu07_build
             text(o, "PackId", "EU07");
             text(o, "PackName", desk_v2 ? display_name + " (EU07, indev)" : display_name + " (EU07, indev, old desk)");
             text(o, "Author", "Comrad_501");
-            text(o, "Version", "0.3.1");
+            text(o, "Version", "0.3.2");
             text(o, "Repository", "https://raw.githubusercontent.com/Comrad501/Dv-WE-4U/refs/heads/main/repository.json");
             o.FindProperty("Cars.Array.data[0]").objectReferenceValue = type;
         });
@@ -567,7 +567,11 @@ public static class eu07_build
             bogie_part(child(brakes, "Bogie2BrakePads"), bogie_model, "Bogie_shoes", end);
             foreach (Transform point in child(car, "ContactPoints"))
                 point.localPosition = new Vector3(point.localPosition.x, point.localPosition.y, Mathf.Sign(point.localPosition.z) * axle_half);
+            // the first sand gauges (2026-11-27) hung on the bogies: gone from there
+            foreach (Transform old in child(child(car, "bogie2"), "bogie2_LOD0").Cast<Transform>().Where(part => part.name.StartsWith("SandBox")).ToArray())
+                UnityEngine.Object.DestroyImmediate(old.gameObject);
         }
+        sand_boxes(top);
         // scripts that turn wheels by their own radius must use the real one, or wheels seem to slip
         foreach (MonoBehaviour script in root.GetComponentsInChildren<MonoBehaviour>(true))
         {
@@ -725,9 +729,13 @@ public static class eu07_build
         {
             GameObject ladder = new GameObject(door.z > 0.0f ? "Ladder_A" : "Ladder_B");
             ladder.transform.SetParent(ladders, false);
-            ladder.transform.localPosition = new Vector3(door.x, 1.30f, door.z);
+            // DV climbs while the player is in this trigger and steps off at its top: the top just over the cab floor.
+            // It reached 2.45 m, 0.79 m over the floor (1.66), and a VR climber went on up into the roof or fell back
+            // onto the floor (0.3.1 tester). Now 0.15 to floor + 0.15 m. NOT yet checked in game (2026-11-25)
+            const float ladder_foot = 0.15f, ladder_top = floor_top + 0.15f;
+            ladder.transform.localPosition = new Vector3(door.x, (ladder_foot + ladder_top) * 0.5f, door.z);
             ladder.transform.localRotation = Quaternion.LookRotation(new Vector3(-Mathf.Sign(door.x), 0.0f, 0.0f), Vector3.up);
-            ladder.AddComponent<BoxCollider>().size = new Vector3(0.50f, 2.30f, 0.34f);
+            ladder.AddComponent<BoxCollider>().size = new Vector3(0.50f, ladder_top - ladder_foot, 0.34f);
             ladder.AddComponent<Ladder>();
         }
         // the game wants an "[interior LOD]" beside an interior prefab (the F4 HUD's, make_hud), or logs an error on every
@@ -745,6 +753,31 @@ public static class eu07_build
             CameraTriggerProxy watcher = room.AddComponent<CameraTriggerProxy>();
             watcher.box = inside;
             room.AddComponent<InternalExternalSnapshotSwitcherProxy>().trigger = watcher;
+        }
+
+        // DRY INSIDE (issue #13): the game's rain wets every surface not inside a dry volume, the cab desks and floors
+        // included. As the stock locos (LocoDE2/DE6/DH4/DM3 "DryVolume": CabinDryVolume + a dry WetDecal, a box
+        // sized by its transform). ONE box, cab front to cab front (2026-11-27): CabinDryVolume fades each box by where the
+        // camera is against THAT box, so with a box per room the next room's floor, seen through the door, was on its
+        // outside fade and wet. The coach figures (CarPassenger, EN43, WE-6F: 0.01 / 0.01 / 0.30) for a long box; its
+        // foot 5 cm under the floor's top (as the EN43), so the floor is inside the box, not on its fading edge
+        const float dry_foot = floor_top - 0.05f, dry_top = roof_top - 0.10f;
+        foreach ((string room, float from_z, float to_z) in new[] { ("inside", -cab_front, cab_front) })
+        {
+            GameObject dry = new GameObject($"[dry {room}]");
+            dry.transform.SetParent(top, false);
+            dry.transform.localPosition = new Vector3(0.0f, (dry_foot + dry_top) * 0.5f, (from_z + to_z) * 0.5f);
+            dry.transform.localScale = new Vector3(body_width - 0.10f, dry_top - dry_foot, to_z - from_z);
+            WetDecalProxy decal = dry.AddComponent<WetDecalProxy>();
+            SerializedObject settings = new SerializedObject(decal);
+            settings.FindProperty("_settings._mode").enumValueIndex = (int) WetDecalEnums.WetDecalMode.Dry;
+            settings.FindProperty("_settings._edgeFadeoff").floatValue = 0.0f;
+            settings.ApplyModifiedPropertiesWithoutUndo();
+            decal.OnValidate();
+            CabinDryVolumeProxy volume = dry.AddComponent<CabinDryVolumeProxy>();
+            volume.distance = 0.01f;
+            volume.edgeFadeOffInside = 0.01f;
+            volume.edgeFadeOffOutside = 0.3f;
         }
 
         // body: his cubes out, block-out model in, minus what game/prefab bring (bogies, pantos, bus bar, buffers, hooks)
@@ -799,6 +832,7 @@ public static class eu07_build
 
         make_lights(top, body.transform);
         make_wipers(top, model, source, layer);
+        make_rain_windows(top, body.transform);
         // WRECK: mod puts it in DV's TrainCarExplosion state after a hard derailment (mod/eu07_wreck.cs)
         // wreck paint + broken panes kept on a hidden object for the mod; rerail/repair restores
         {
@@ -950,8 +984,166 @@ public static class eu07_build
         }
     }
 
+    // ---- RAIN ON THE WINDSCREENS (2026-11-27, user: "functional windshield wipers, since for now they just swish") ----
+    // DV's Window (DV.Rain) on each of the 6 front panes: droplets simulated on the glass, cleared where a Wiper's blade
+    // (its Start..End) sweeps. As the stock locos (DH4, DE6, DM3, read from the game's files): one unit-scale node per
+    // pane at the glass's middle, its z along the car's running direction out of that cab, its y up the glass,
+    // sizeInMeters the pane, four edge nodes at its corners, no baked UVs, rb found at load (Window.SetupSimulation).
+    // Each pane simulates its own (no mirrored duplicates: our panes are not mirror pairs on one texture). The game
+    // puts its own window material on the pane (Window.UpdateMaterialsOnSelf); eu07_wreck.cs breaks those panes too.
+    // The model's export joins all its glass into Parts_eu07_glass (eu07_blockout.py, by material); a Window needs its
+    // pane as its own renderer. Re-exporting the body would risk the paint atlas (players' skins: texture names are
+    // public), so the six front panes are cut out of the joined glass here: pieces welded by position (1 mm), the ones
+    // at the cab ends (|z| > 6.5 m, over 2.5 m, inside the corners) become Window_front_A0..B2, the rest stays.
+    private static List<Transform> split_windscreens(Transform top, Transform body)
+    {
+        MeshFilter glass = body.GetComponentsInChildren<MeshFilter>(true).FirstOrDefault(found => found.name == "Parts_eu07_glass") ?? throw new KeyNotFoundException("the body brought no Parts_eu07_glass");
+        Mesh whole = glass.sharedMesh;
+        Matrix4x4 to_car = top.worldToLocalMatrix * glass.transform.localToWorldMatrix;
+        Vector3[] points = whole.vertices, car = points.Select(point => to_car.MultiplyPoint3x4(point)).ToArray();
+        int[] triangles = whole.triangles;
+        // weld by position, then join each triangle's corners
+        Dictionary<Vector3Int, int> keys = new Dictionary<Vector3Int, int>();
+        int[] key_of = car.Select(point =>
+        {
+            Vector3Int key = Vector3Int.RoundToInt(point * 1000.0f);
+            if (!keys.TryGetValue(key, out int number))
+                keys[key] = number = keys.Count;
+            return number;
+        }).ToArray();
+        int[] parent = Enumerable.Range(0, keys.Count).ToArray();
+        int root(int one) { while (parent[one] != one) one = parent[one] = parent[parent[one]]; return one; }
+        for (int index = 0; index < triangles.Length; index += 3)
+        {
+            int a = root(key_of[triangles[index]]);
+            parent[root(key_of[triangles[index + 1]])] = a;
+            parent[root(key_of[triangles[index + 2]])] = a;
+        }
+        var pieces = Enumerable.Range(0, triangles.Length / 3).GroupBy(face => root(key_of[triangles[face * 3]])).Select(group =>
+        {
+            int[] faces = group.ToArray();
+            Vector3[] seen = faces.SelectMany(face => new[] { car[triangles[face * 3]], car[triangles[face * 3 + 1]], car[triangles[face * 3 + 2]] }).ToArray();
+            return (faces, middle: seen.Aggregate(Vector3.zero, (sum, point) => sum + point) / seen.Length);
+        }).ToList();
+        var fronts = pieces.Where(piece => Mathf.Abs(piece.middle.z) > 6.5f && piece.middle.y > 2.5f && Mathf.Abs(piece.middle.x) < 1.30f)
+            .OrderByDescending(piece => Mathf.Sign(piece.middle.z)).ThenBy(piece => piece.middle.x * Mathf.Sign(piece.middle.z)).ToList();
+        if (fronts.Count != 6)
+            throw new InvalidDataException($"the joined glass has {fronts.Count} windscreen pieces, not 6: " + string.Join(" ", fronts.Select(piece => piece.middle.ToString("F2"))));
+        // the cab sides (2026-11-27, user: "side ones dont though"): the fixed panes and the door windows over the cab
+        // floor (between the cab's back wall and its front), not the machine room's
+        var sides = pieces.Where(piece => Mathf.Abs(piece.middle.x) > 1.30f && Mathf.Abs(piece.middle.z) > cab_back && Mathf.Abs(piece.middle.z) < cab_front && piece.middle.y > 2.4f)
+            .OrderByDescending(piece => Mathf.Sign(piece.middle.z)).ThenBy(piece => piece.middle.x).ThenBy(piece => Mathf.Abs(piece.middle.z)).ToList();
+        if (sides.Count < 4)
+            throw new InvalidDataException($"the joined glass has {sides.Count} cab side pieces: " + string.Join(" ", sides.Select(piece => piece.middle.ToString("F2"))));
+        List<Transform> made = new List<Transform>();
+        HashSet<int> taken = new HashSet<int>();
+        Mesh cut(string name, IEnumerable<int> faces)
+        {
+            List<int> used = faces.SelectMany(face => new[] { triangles[face * 3], triangles[face * 3 + 1], triangles[face * 3 + 2] }).Distinct().ToList();
+            Dictionary<int, int> renumber = used.Select((old, number) => (old, number)).ToDictionary(pair => pair.old, pair => pair.number);
+            Mesh piece = new Mesh { name = name };
+            piece.SetVertices(used.Select(old => points[old]).ToList());
+            if (whole.normals.Length == points.Length) piece.SetNormals(used.Select(old => whole.normals[old]).ToList());
+            if (whole.tangents.Length == points.Length) piece.SetTangents(used.Select(old => whole.tangents[old]).ToList());
+            if (whole.uv.Length == points.Length) piece.SetUVs(0, used.Select(old => whole.uv[old]).ToList());
+            if (whole.uv2.Length == points.Length) piece.SetUVs(1, used.Select(old => whole.uv2[old]).ToList());
+            piece.SetTriangles(faces.SelectMany(face => new[] { renumber[triangles[face * 3]], renumber[triangles[face * 3 + 1]], renumber[triangles[face * 3 + 2]] }).ToList(), 0);
+            piece.RecalculateBounds();
+            AssetDatabase.CreateAsset(piece, $"{target}/EU07_{name}.asset");
+            return piece;
+        }
+        var wanted = fronts.Select((piece, index) => (name: $"Window_front_{(index < 3 ? "A" : "B")}{index % 3}", piece))
+            .Concat(sides.Select((piece, index) => (name: $"Window_side_{(piece.middle.z > 0.0f ? "A" : "B")}_{(piece.middle.x > 0.0f ? "R" : "L")}{index}", piece)));
+        foreach (var one in wanted)
+        {
+            GameObject pane = new GameObject(one.name);
+            pane.transform.SetParent(glass.transform.parent, false);
+            pane.transform.localPosition = glass.transform.localPosition;
+            pane.transform.localRotation = glass.transform.localRotation;
+            pane.transform.localScale = glass.transform.localScale;
+            pane.layer = glass.gameObject.layer;
+            pane.AddComponent<MeshFilter>().sharedMesh = cut("glass_" + one.name, one.piece.faces);
+            pane.AddComponent<MeshRenderer>().sharedMaterials = glass.GetComponent<MeshRenderer>().sharedMaterials;
+            foreach (int face in one.piece.faces)
+                taken.Add(face);
+            made.Add(pane.transform);
+        }
+        glass.sharedMesh = cut("glass_rest", Enumerable.Range(0, triangles.Length / 3).Where(face => !taken.Contains(face)));
+        Debug.Log($"EU07 BUILD: glass cut for the rain: {pieces.Count} pieces, 6 fronts at " + string.Join(" ", fronts.Select(piece => piece.middle.ToString("F2"))) + $"; {sides.Count} cab sides at " + string.Join(" ", sides.Select(piece => piece.middle.ToString("F2"))));
+        return made;
+    }
+
+    private static void make_rain_windows(Transform top, Transform body)
+    {
+        WiperProxy[] wipers = top.GetComponentsInChildren<WiperProxy>(true);
+        foreach (Transform old in top.Cast<Transform>().Where(part => part.name.StartsWith("[rain ")).ToArray())
+            UnityEngine.Object.DestroyImmediate(old.gameObject);
+        foreach (Transform pane in split_windscreens(top, body))
+            rain_on(top, pane.GetComponent<MeshRenderer>(), top, pane.name.StartsWith("Window_front_") ? wipers : new WiperProxy[0]);
+    }
+
+    // DV's Window on one pane. `frame`: the car's frame (the body's top or the interior root, both the car's);
+    // `hang_on`: what the node rides on (the car, or a sliding pane's or a door's moving part); outward: out of the
+    // cab's end for a windscreen, out of the side for side glass; a wiper only where its spindle stands over the pane
+    private static void rain_on(Transform frame, MeshRenderer shown, Transform hang_on, WiperProxy[] wipers, string part = null)
+    {
+        part = part ?? shown.name;
+        Mesh mesh = shown.GetComponent<MeshFilter>().sharedMesh;
+        Matrix4x4 to_car = frame.worldToLocalMatrix * shown.transform.localToWorldMatrix;
+        Vector3[] points = mesh.vertices.Select(point => to_car.MultiplyPoint3x4(point)).ToArray();
+        Vector3 middle = points.Aggregate(Vector3.zero, (sum, point) => sum + point) / points.Length;
+        Vector3 outward = Mathf.Abs(middle.x) > 1.30f ? new Vector3(Mathf.Sign(middle.x), 0.0f, 0.0f) : new Vector3(0.0f, 0.0f, Mathf.Sign(middle.z));
+        // the glass's face: the biggest face of the slab, turned outward
+        Vector3 normal = Vector3.zero;
+        int[] corners = mesh.triangles;
+        for (int index = 0; index < corners.Length; index += 3)
+        {
+            Vector3 face = Vector3.Cross(points[corners[index + 1]] - points[corners[index]], points[corners[index + 2]] - points[corners[index]]);
+            if (Vector3.Dot(face, outward) < 0.0f)
+                face = -face;
+            if (face.sqrMagnitude > normal.sqrMagnitude)
+                normal = face;
+        }
+        normal.Normalize();
+        if (Vector3.Dot(normal, outward) < 0.5f)
+            throw new InvalidDataException($"{part}'s glass faces {normal:F3}, not {outward}");
+        Vector3 up = Vector3.ProjectOnPlane(Vector3.up, normal).normalized;
+        Quaternion turn = Quaternion.LookRotation(normal, up);
+        Vector3 across = turn * Vector3.right;
+        float x0 = points.Min(point => Vector3.Dot(point, across)), x1 = points.Max(point => Vector3.Dot(point, across));
+        float y0 = points.Min(point => Vector3.Dot(point, up)), y1 = points.Max(point => Vector3.Dot(point, up));
+        float z0 = points.Min(point => Vector3.Dot(point, normal)), z1 = points.Max(point => Vector3.Dot(point, normal));
+        Vector3 centre = across * (x0 + x1) * 0.5f + up * (y0 + y1) * 0.5f + normal * (z0 + z1) * 0.5f;
+        Vector2 size = new Vector2(x1 - x0, y1 - y0);
+        if (size.x < 0.15f || size.x > 1.1f || size.y < 0.3f || size.y > 0.9f || z1 - z0 > 0.05f)
+            throw new InvalidDataException($"{part} came in wrong: {size.x:F3} x {size.y:F3}, {z1 - z0:F3} thick");
+        GameObject node_made = new GameObject($"[rain {part}]");
+        node_made.transform.SetParent(hang_on, false);
+        node_made.transform.position = frame.TransformPoint(centre);
+        node_made.transform.rotation = frame.rotation * turn;
+        Vector3 scale = hang_on.lossyScale;
+        node_made.transform.localScale = new Vector3(1.0f / scale.x, 1.0f / scale.y, 1.0f / scale.z);
+        WindowProxy window = node_made.AddComponent<WindowProxy>();
+        window.simulate = true;
+        window.visuals = new[] { shown };
+        window.sizeInMeters = size;
+        window.windowEdges = new[] { new Vector2(1, 1), new Vector2(1, -1), new Vector2(-1, -1), new Vector2(-1, 1) }
+            .Select((corner, index) => node(node_made.transform, "window edge " + index, new Vector3(corner.x * size.x * 0.5f, corner.y * size.y * 0.5f, 0.0f)).transform).ToArray();
+        WiperProxy wiper = wipers.OrderBy(one => Mathf.Abs(frame.InverseTransformPoint(one.transform.position).x - centre.x) + Mathf.Abs(frame.InverseTransformPoint(one.transform.position).z - centre.z))
+            .FirstOrDefault(one => Mathf.Abs(frame.InverseTransformPoint(one.transform.position).x - centre.x) < 0.30f && Mathf.Abs(frame.InverseTransformPoint(one.transform.position).z - centre.z) < 0.60f);
+        window.wipers = wiper != null ? new[] { wiper } : new WiperProxy[0];
+        serialised(window, "simulate", "visuals", "wipers", "windowEdges", "sizeInMeters");
+        string blade = "";
+        if (wiper != null)
+        {
+            Vector3 a = node_made.transform.InverseTransformPoint(wiper.start.position), b = node_made.transform.InverseTransformPoint(wiper.end.position);
+            blade = $", wiper {wiper.transform.parent.name}: blade from {a:F3} to {b:F3} (pane frame)";
+        }
+        Debug.Log($"EU07 BUILD: rain on {part}: centre {centre:F3}, faces {normal:F3}, {size.x:F3} x {size.y:F3} m, on {hang_on.name}{blade}");
+    }
+
     // ---- WIPERS ----
-    // 4, one per outer pane, own valve each; rotary wiper: off/slow/fast; no rain (plain glass)
+    // 4, one per outer pane, own valve each; rotary wiper: off/slow/fast; the rain they clear: make_rain_windows
     // model frame x across, y along, z up = vehicle (-x, z, -y): model cab B is vehicle cab A
     private static readonly (string part, string name, string control, Vector3 spindle, Vector3 points)[] wiper_parts =
     {
@@ -1313,6 +1505,8 @@ public static class eu07_build
         ("eu07_wheel_centre"  , new Color(0.185f, 0.155f, 0.125f), 0.1f, 0.14f),
         ("eu07_brake_shoe"    , new Color(0.200f, 0.130f, 0.090f), 0.0f, 0.10f),
         ("eu07_axlebox_cover" , new Color(0.560f, 0.450f, 0.150f), 0.0f, 0.18f),
+        ("eu07_sand"          , new Color(0.760f, 0.640f, 0.430f), 0.0f, 0.05f),      // dry sand behind the sight glass
+        ("eu07_sand_box"      , new Color(0.400f, 0.355f, 0.310f), 0.0f, 0.12f),      // the sand box: as the painted underfloor boxes beside it read in light
         // desk parts (model/eu07_desk_parts.py): matte as the desk; handles a little worn bright
         ("eu07_wheel"       , new Color(0.06f, 0.065f, 0.07f), 0.0f, 0.30f),
         ("eu07_desk_grey"   , new Color(0.62f, 0.63f, 0.62f), 0.0f, 0.25f),
@@ -1330,6 +1524,145 @@ public static class eu07_build
 
     // bogie model part put on a template bogie object, replacing what was there
     private static readonly Dictionary<string, Mesh> bogie_meshes = new Dictionary<string, Mesh>();
+
+    // SAND BOX with a SIGHT GLASS, one a side (the author, 2026-11-27: "glass and sand behind it", "low, by the bogies",
+    // "1 per side, more to the middle, not on the bogies themselves"): hung from the floor at the outer end of the short
+    // underfloor box (model/eu07_blockout.py, item 7), in the 0.27 m before the bogie, flush with the box row's face.
+    // Car frame: rail top, x across, y up, z along. The model's short boxes lie where x and z have the same sign
+    // (Blender to Unity is a mirror either way: right side toward cab A, left toward cab B). Outboard of x 1.10 the
+    // bogie frame does not reach in here; its corner pots (to x 1.17) stay 0.27 m along even with the bogie turned.
+    // "SandLevel" is scaled in y by the mod (eu07_driver.show_sand: sand.NORMALIZED), its pivot at the window's foot.
+    // Not a real EU07 fitting: a gauge for the game's sand.
+    public const float sand_window_height = 0.200f;
+    // PAINT OF A MODEL FACE: the body FBX's triangle under `at` (car frame) facing `facing`; its material, the UV there,
+    // and how the UV runs per metre along car z and car y on that face
+    private static (Material paint, Vector2 uv, Vector2 per_z, Vector2 per_y) model_paint(Vector3 at, Vector3 facing)
+    {
+        GameObject model = AssetDatabase.LoadAssetAtPath<GameObject>(body_fbx) ?? throw new IOException("no model at " + body_fbx);
+        foreach (MeshFilter filter in model.GetComponentsInChildren<MeshFilter>(true))
+        {
+            Mesh mesh = filter.sharedMesh;
+            if (mesh == null)
+                continue;
+            Matrix4x4 to_car = model.transform.worldToLocalMatrix * filter.transform.localToWorldMatrix;
+            Vector3[] points = mesh.vertices;
+            Vector2[] uvs = mesh.uv;
+            if (uvs.Length != points.Length)
+                continue;
+            Material[] materials = filter.GetComponent<MeshRenderer>().sharedMaterials;
+            for (int part = 0; part < mesh.subMeshCount; ++part)
+            {
+                int[] corners = mesh.GetTriangles(part);
+                for (int index = 0; index < corners.Length; index += 3)
+                {
+                    Vector3 p0 = to_car.MultiplyPoint3x4(points[corners[index]]), p1 = to_car.MultiplyPoint3x4(points[corners[index + 1]]), p2 = to_car.MultiplyPoint3x4(points[corners[index + 2]]);
+                    Vector3 normal = Vector3.Cross(p1 - p0, p2 - p0);
+                    if (normal.sqrMagnitude < 1e-12f || Mathf.Abs(Vector3.Dot(normal.normalized, facing)) < 0.95f || Mathf.Abs(Vector3.Dot(at - p0, normal.normalized)) > 0.004f)
+                        continue;
+                    // barycentric in the face's (z, y)
+                    Vector2 a2 = new Vector2(p0.z, p0.y), b2 = new Vector2(p1.z, p1.y), c2 = new Vector2(p2.z, p2.y), q = new Vector2(at.z, at.y);
+                    float area = (b2.x - a2.x) * (c2.y - a2.y) - (c2.x - a2.x) * (b2.y - a2.y);
+                    if (Mathf.Abs(area) < 1e-9f)
+                        continue;
+                    float w1 = ((q.x - a2.x) * (c2.y - a2.y) - (c2.x - a2.x) * (q.y - a2.y)) / area, w2 = ((b2.x - a2.x) * (q.y - a2.y) - (q.x - a2.x) * (b2.y - a2.y)) / area, w0 = 1.0f - w1 - w2;
+                    if (w0 < -0.001f || w1 < -0.001f || w2 < -0.001f)
+                        continue;
+                    Vector2 t0 = uvs[corners[index]], t1 = uvs[corners[index + 1]], t2 = uvs[corners[index + 2]];
+                    Vector2 uv = t0 * w0 + t1 * w1 + t2 * w2;
+                    // UV gradient: [dz1 dy1; dz2 dy2] [per_z; per_y] = [dt1; dt2]
+                    float dz1 = b2.x - a2.x, dy1 = b2.y - a2.y, dz2 = c2.x - a2.x, dy2 = c2.y - a2.y;
+                    Vector2 per_z = ((t1 - t0) * dy2 - (t2 - t0) * dy1) / area, per_y = ((t2 - t0) * dz1 - (t1 - t0) * dz2) / area;
+                    string name = materials[Mathf.Min(part, materials.Length - 1)].name;
+                    Debug.Log($"EU07 BUILD: paint at {at:F3} from {filter.name} ({name}): uv {uv:F4}, per m along {per_z:F4}, up {per_y:F4}");
+                    return (body_material(name), uv, per_z, per_y);
+                }
+            }
+        }
+        throw new InvalidDataException($"no model face at {at:F3} facing {facing}");
+    }
+
+    // BOXES PAINTED from one model face: the faces across x at true scale (car z, y) about the sampled point; the others
+    // squeezed into 0.05 m of it so they stay on that face's island of the atlas
+    private static Mesh painted_blocks(string name, (Material paint, Vector2 uv, Vector2 per_z, Vector2 per_y) paint, params (Vector3 least, Vector3 most)[] boxes)
+    {
+        List<Vector3> points = new List<Vector3>(), normals = new List<Vector3>();
+        List<Vector2> laid = new List<Vector2>();
+        List<int> triangles = new List<int>();
+        foreach ((Vector3 least, Vector3 most) in boxes)
+        {
+            Vector3 middle = (least + most) * 0.5f, half = (most - least) * 0.5f;
+            foreach (Vector3 way in new[] { Vector3.right, Vector3.left, Vector3.up, Vector3.down, Vector3.forward, Vector3.back })
+            {
+                Vector3 one = Mathf.Abs(way.x) > 0.5f ? Vector3.up : Vector3.right, other = Vector3.Cross(way, one);
+                Vector3 centre = middle + Vector3.Scale(way, half);
+                Vector3 span_one = Vector3.Scale(one, half), span_other = Vector3.Scale(other, half);
+                Vector3[] corners = { centre - span_one - span_other, centre + span_one - span_other, centre + span_one + span_other, centre - span_one + span_other };
+                float squeeze = Mathf.Min(1.0f, 0.05f / Mathf.Max(0.001f, Mathf.Max(span_one.magnitude, span_other.magnitude)));
+                int first = points.Count;
+                foreach (Vector3 corner in corners)
+                {
+                    Vector3 off = corner - centre;
+                    float along = Mathf.Abs(way.x) > 0.5f ? off.z : Vector3.Dot(off, one) * squeeze;
+                    float up = Mathf.Abs(way.x) > 0.5f ? off.y : Vector3.Dot(off, other) * squeeze;
+                    if (Mathf.Abs(way.x) > 0.5f)
+                        along += centre.z - middle.z;      // the box's own place on the sampled face is its middle
+                    points.Add(corner);
+                    normals.Add(way);
+                    laid.Add(paint.uv + paint.per_z * along + paint.per_y * up);
+                }
+                bool turned = Vector3.Dot(Vector3.Cross(corners[1] - corners[0], corners[2] - corners[0]), way) < 0.0f;
+                triangles.AddRange(turned ? new[] { first, first + 2, first + 1, first, first + 3, first + 2 } : new[] { first, first + 1, first + 2, first, first + 2, first + 3 });
+            }
+        }
+        shapes.Remove(name);
+        return keep_shape(name, points, normals, triangles, laid);
+    }
+
+    private static void sand_boxes(Transform car)
+    {
+        // the hopper: the box row's depth (its inner face 0.585 off the middle), up to the floor; a step and spout under it.
+        // Ends 1.52 from the middle, clear of the bogie's end beam on curves (eu07_shots.sand_clearance measures it).
+        // Painted from the short box's door beside it (model_paint), so it wears the same paint and grime; the window's
+        // frame, the flap and the drip are the box's sheet and angle; the hinge and the handle steel, as the boxes' catches.
+        const float x_in = 0.620f, x_out = 1.321f, z_from = 1.392f, z_to = 1.520f, y_foot = 0.800f, floor_under = 1.291f;
+        const float window_wide = 0.050f, window_foot = 0.860f;
+        Material steel = body_material("eu07_steel"), sand = body_material("eu07_sand"), back = body_material("eu07_grille"), glass = body_material("eu07_glass");
+        foreach (Transform old in car.Cast<Transform>().Where(part => part.name.StartsWith("SandBox")).ToArray())
+            UnityEngine.Object.DestroyImmediate(old.gameObject);
+        foreach (int side in new[] { 1, -1 })
+        {
+            float along = side * (z_from + z_to) * 0.5f, length = z_to - z_from, outer = side * x_out;
+            // the short box's door on this side, its middle: the hopper's 0.49 m face maps inside the door's 0.51
+            var paint = model_paint(new Vector3(side * (x_out + 0.014f), 0.976f, side * 1.0155f), new Vector3(side, 0.0f, 0.0f));
+            Transform at = node(car, side > 0 ? "SandBox_R" : "SandBox_L", Vector3.zero).transform;
+            (Vector3, Vector3) span(float xa, float xb, float ya, float yb, float za, float zb) =>
+                (new Vector3(Mathf.Min(side * xa, side * xb), ya, Mathf.Min(za, zb)), new Vector3(Mathf.Max(side * xa, side * xb), yb, Mathf.Max(za, zb)));
+            float z0 = along - length * 0.5f, z1 = along + length * 0.5f;
+            const float bar = 0.012f, proud = 0.008f, flap_foot = 1.120f, flap_top = 1.250f;
+            float wy0 = window_foot, wy1 = window_foot + sand_window_height, wz0 = along - window_wide * 0.5f, wz1 = along + window_wide * 0.5f;
+            Mesh body = painted_blocks($"sand_box_{(side > 0 ? "R" : "L")}", paint,
+                span(x_in, x_out, y_foot, floor_under, z0, z1),                               // hopper
+                span(0.83f, 1.07f, y_foot - 0.09f, y_foot, z0 + 0.015f, z1 - 0.015f),         // step under it
+                span(x_out, x_out + 0.020f, y_foot, y_foot + 0.024f, z0, z1),                 // drip angle
+                span(x_out, x_out + 0.012f, flap_foot, flap_top, z0 + 0.015f, z1 - 0.015f),   // filler flap
+                span(x_out, x_out + proud, wy1, wy1 + bar, wz0 - bar, wz1 + bar),              // window frame: top
+                span(x_out, x_out + proud, wy0 - bar, wy0, wz0 - bar, wz1 + bar),              //   foot
+                span(x_out, x_out + proud, wy0, wy1, wz0 - bar, wz0),                          //   sides
+                span(x_out, x_out + proud, wy0, wy1, wz1, wz1 + bar));
+            shaped(at, "Hopper", body, paint.paint, Vector3.zero);
+            solid(at, "SpoutPipe", PrimitiveType.Cylinder, back, new Vector3(side * 0.95f, y_foot - 0.135f, along), new Vector3(0.045f, 0.045f, 0.045f), Quaternion.identity, false);
+            solid(at, "FlapHinge", PrimitiveType.Cylinder, steel, new Vector3(outer + side * 0.014f, flap_top - 0.004f, along), new Vector3(0.016f, (length - 0.04f) * 0.5f, 0.016f), Quaternion.Euler(90f, 0f, 0f), false);
+            solid(at, "FlapHandle", PrimitiveType.Cube, steel, new Vector3(outer + side * 0.022f, flap_foot + 0.025f, along), new Vector3(0.012f, 0.014f, 0.060f), Quaternion.identity, false);
+            // the window: dark behind, the sand column, the glass, inside the painted frame
+            solid(at, "SightBack", PrimitiveType.Cube, back, new Vector3(outer + side * 0.0005f, (wy0 + wy1) * 0.5f, along), new Vector3(0.001f, sand_window_height, window_wide), Quaternion.identity, false);
+            GameObject level = node(at, "SandLevel", new Vector3(outer + side * 0.0015f, window_foot, along));
+            solid(level.transform, "Sand", PrimitiveType.Cube, sand, new Vector3(0.0f, sand_window_height * 0.5f, 0.0f), new Vector3(0.001f, sand_window_height, window_wide), Quaternion.identity, false);
+            solid(at, "SightGlass", PrimitiveType.Cube, glass, new Vector3(outer + side * 0.003f, (wy0 + wy1) * 0.5f, along), new Vector3(0.002f, sand_window_height, window_wide), Quaternion.identity, false);
+            // MIN and MAX: two short steel marks on the frame's side
+            foreach ((string mark, float share) in new[] { ("Min", 0.15f), ("Max", 0.90f) })
+                solid(at, "Tick" + mark, PrimitiveType.Cube, steel, new Vector3(outer + side * (proud + 0.0005f), window_foot + share * sand_window_height, wz1 + bar * 0.5f), new Vector3(0.001f, 0.004f, bar), Quaternion.identity, false);
+        }
+    }
 
     private static void bogie_part(Transform onto, GameObject model, string name, string end)
     {
@@ -2342,8 +2675,10 @@ public static class eu07_build
         Vector3 valve = placed("BrakeValve", new Vector3(ped_x + 0.331f, top_y, ped_z + 0.039f));
         desk_part(desk, "BrakeValve", valve);
         desk_part(desk, "BrakeValveCap", placed("BrakeValveCap", valve));
+        // grab box on the outer 12 cm only (the knob end), raised: swung over the wheel's rim (27 mm under it) the
+        // whole-handle box sat on the rim's grab boxes and a VR hand reaching for the brake took the wheel (0.3.1 tester)
         GameObject brake = make_lever(desk, "TrainBrake", placed("BrakeHandle", valve + new Vector3(0.0f, 0.200f, 0.0f)),
-            new Vector3(-0.11f, 0.010f, 0.0f), new Vector3(0.22f, 0.045f, 0.045f), new Vector3(-0.19f, 0.020f, 0.0f),
+            new Vector3(-0.16f, 0.018f, 0.0f), new Vector3(0.12f, 0.040f, 0.045f), new Vector3(-0.19f, 0.020f, 0.0f),
             Vector3.down, 0.0f, 158.0f, 11, "brake.EXT_IN", "BrakeIncremental", "BrakeAbsolute", null, null, 0.09f, true);
         desk_part(brake.transform, "BrakeHandle", Vector3.zero);
         brake.transform.parent.localRotation = Quaternion.Euler(0.0f, 65.0f, 0.0f);    // built pointing left; turned to ahead-left
@@ -2482,7 +2817,15 @@ public static class eu07_build
             solid(desk, "WiperValveBody", PrimitiveType.Cylinder, black, valve_at + new Vector3(0.0f, 0.028f, 0.0f), new Vector3(0.044f, 0.028f, 0.044f), Quaternion.identity, false);
             GameObject wiper_valve = make_lever(desk, "Wiper" + side, valve_at + new Vector3(0.0f, 0.072f, 0.0f),
                 new Vector3(-0.042f, 0.0f, 0.0f), new Vector3(0.105f, 0.006f, 0.018f), new Vector3(-0.085f, 0.0f, 0.0f),
-                Vector3.down, 0.0f, 70.0f, 3, $"wiper{side}A.EXT_IN", "WiperIncremental", "WiperAbsolute", null, chrome, 0.0f);
+                Vector3.down, 0.0f, 70.0f, 3, $"wiper{side}A.EXT_IN", "WiperIncremental", "WiperAbsolute", null, chrome, 0.0f, how: feel_cock);
+            // 0.3.1 tester: stiff, and a long stretch from the seat. A light valve now, and a hidden grab box round the
+            // slim chrome handle (6 mm thick) so a reaching hand still takes it; the handle itself is unchanged
+            GameObject reach_grab = solid(wiper_valve.transform, "ReachGrab", PrimitiveType.Cube, white, new Vector3(-0.045f, 0.010f, 0.0f), new Vector3(0.125f, 0.040f, 0.050f), Quaternion.identity, true);
+            UnityEngine.Object.DestroyImmediate(reach_grab.GetComponent<MeshRenderer>());
+            UnityEngine.Object.DestroyImmediate(reach_grab.GetComponent<MeshFilter>());
+            LeverProxy wiper_lever = wiper_valve.GetComponent<LeverProxy>();
+            wiper_lever.colliderGameObjects = wiper_lever.colliderGameObjects.Concat(new[] { reach_grab }).ToArray();
+            wiper_lever.OnValidate();
             if (side == "Left")
                 no_keys(wiper_valve.transform);
             make_label(sill_top, new Vector3(across, 0.756f - 0.050f, -0.001f), side == "Left" ? "eu07/wiper_left" : "eu07/wiper_right", control_caption);
@@ -2810,8 +3153,10 @@ public static class eu07_build
         CustomizationPlacementMeshesProxy cab_gadgets = root.GetComponent<CustomizationPlacementMeshesProxy>();
         if (cab_gadgets == null)
             cab_gadgets = root.AddComponent<CustomizationPlacementMeshesProxy>();
-        cab_gadgets.collisionMeshes = new MeshFilter[0];
-        cab_gadgets.drillDisableMeshes = new MeshFilter[0];
+        // keep the boards set above (overwritten here from c93d2ae until 0.3.2)
+        cab_gadgets.collisionMeshes = (cab_gadgets.collisionMeshes ?? new MeshFilter[0]).Where(board => board != null).ToArray();
+        if (cab_gadgets.drillDisableMeshes == null)
+            cab_gadgets.drillDisableMeshes = new MeshFilter[0];
         cab_gadgets.generateFromTrainInteriorCols = true;
         EditorUtility.SetDirty(cab_gadgets);
     }
@@ -4320,6 +4665,8 @@ public static class eu07_build
         control.AddComponent<OpenableControlProxy>().closedAtZero = true;
         sounds(slide, ("drag", "LeverDrag_02_MetalLightDirt"), ("limitHit", "LeverLimit_01_PlasticLight"));
         slide.OnValidate();
+        // rain on the pane, riding on the slide (rain_on)
+        rain_on(parent, pane.GetComponent<MeshRenderer>(), control.transform, new WiperProxy[0], name);
     }
 
     // CONTACTOR ARMS + ARC CHUTES at the model's hinges (model/eu07_contactors.txt; vehicle = (-x, z, -y) of model)
@@ -4547,8 +4894,6 @@ public static class eu07_build
         LeverProxy lever = control.AddComponent<LeverProxy>();
         lever.colliderGameObjects = new[] { grip };
         lever.interactionPoint = point.transform;
-        lever.rigidbodyMass = 2.0f;
-        lever.rigidbodyDrag = 15.0f;
         // wheel down brings it down
         lever.scrollWheelHoverScroll = -1.0f;
         lever.useSteppedJoint = true;
@@ -4556,11 +4901,13 @@ public static class eu07_build
         lever.notches = 6;
         lever.jointAxis = Vector3.left;    // about -x, up-along-y comes over toward -z: into the cab
         lever.useSpring = true;
-        lever.jointSpring = 40.0f;
-        lever.jointDamper = 3.0f;
         lever.useLimits = true;
         lever.jointLimitMin = 0.0f;
         lever.jointLimitMax = comes_over - leans;
+        // 0.3.1 tester: "very hard to lower and even harder to close". Was mass 2, drag 15 (most of a lever's mass in
+        // drag), no hand snapper. Now a hinged flap as the stock breaker-box doors, the hand taken at the free edge
+        feel(lever, feel_flap);
+        vr_line(control, new Vector3(-wide * 0.5f + 0.06f, foot + tall, 0.0f), new Vector3(wide * 0.5f - 0.06f, foot + tall, 0.0f));
         serialised(lever, "interactionPoint", "useSteppedJoint", "steppedValueUpdate", "notches", "jointAxis", "jointLimitMin", "jointLimitMax", "useSpring");
         control.AddComponent<NotchedControlNumberedNamesProxy>();
         sounds(lever, ("notch", "LeverNotch_04_Tick"), ("limitHit", "LeverLimit_01_PlasticLight"));
@@ -4612,6 +4959,9 @@ public static class eu07_build
             GameObject shown = node(leaf.transform, materials[index].name, Vector3.zero);
             shown.AddComponent<MeshFilter>().sharedMesh = piece;
             shown.AddComponent<MeshRenderer>().sharedMaterial = body_material(materials[index].name);
+            // the cab doors' window: rain on it, riding on the leaf (rain_on); the machine-room doors stay plain
+            if (name.StartsWith("DoorCab") && materials[index].name == "eu07_glass")
+                rain_on(parent, shown.GetComponent<MeshRenderer>(), leaf.transform, new WiperProxy[0], name + "Glass");
         }
         // HANDLES at model/eu07_door_handles.txt, shaped as DV's cab doors and the ref: door_lever() (22 x 14 x 128 mm)
         // on a 40 x 190 plate; inside cab outside doors a lock case 111 x 88 on 118 x 228 plate, as the ref
@@ -4816,9 +5166,12 @@ public static class eu07_build
     // and the VR tester could barely move the reverser and brakes and not at all the cocks and knife switches
     private static readonly (float mass, float drag, float spring, float damper)
         feel_handle   = (30.0f, 8.0f, 100.0f, 10.0f),     // DE6 train and independent brake, throttle, dynamic brake
+        // 0.3.1 tester: the wheel "very loose" (yanked by a hand passing to the brake), the horn "still a little stiff"
+        feel_wheel    = (30.0f, 16.0f, 100.0f, 10.0f),    // DE2/DM3 throttle's drag (16) on the DE6's spring and damper
         feel_reverser = (30.0f, 3.0f, 15.0f, 1.0f),       // DE6 reverser
-        feel_horn     = (30.0f, 0.0f, 20.0f, 1.0f),       // DM3 horn (pinched at the knob, as ours)
-        feel_cock     = (10.0f, 1.0f, 5.0f, 0.35f),       // DE2/DM3 brake isolation valve
+        feel_horn     = (30.0f, 0.0f, 7.0f, 1.0f),        // DE2 horn (pinched at the knob, as ours); was the DM3's spring 20
+        feel_cock     = (10.0f, 1.0f, 5.0f, 0.35f),       // DE2/DM3 brake isolation valve (also the wiper valves)
+        feel_flap     = (20.0f, 2.0f, 60.0f, 2.0f),       // DE6/DH4 breaker-box door (the sun visors)
         feel_knife    = (5.0f, 6.0f, 6.0f, 1.0f);         // DE6 electrics knife breaker
 
     private static void feel(LeverProxy lever, (float mass, float drag, float spring, float damper) how)
@@ -4952,7 +5305,7 @@ public static class eu07_build
         lever.jointLimitMin = -controller_sweep;
         lever.jointLimitMax =  controller_sweep;
         lever.invertDirection = false;
-        feel(lever, feel_handle);    // as the DE6 throttle (was mass 5, drag 15, spring 400: stiff in VR)
+        feel(lever, feel_wheel);    // (0.3.0: mass 5, drag 15, spring 400, stiff in VR; 0.3.1: the DE6 throttle's, too loose)
         serialised(lever, "interactionPoint", "rigidbodyMass", "rigidbodyDrag", "scrollWheelHoverScroll", "useSteppedJoint",
             "steppedValueUpdate", "notches", "jointAxis", "useSpring", "jointSpring", "jointDamper", "useLimits",
             "jointLimitMin", "jointLimitMax", "invertDirection");

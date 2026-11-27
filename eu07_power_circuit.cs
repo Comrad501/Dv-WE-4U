@@ -239,6 +239,10 @@ internal partial class eu07_sim
         public bool  heating_tripped      { get; private set; } = false;
         public bool  heating_on           { get; private set; } = false; // lamp LSGP
         public bool  slip_detected        { get; private set; } = false; // lamp LS9
+        // the game's own wheelslip, from the mod: in the game every motor reads one wheel RPM, so the relays' EMF
+        // difference never forms; the lamp follows the game's slip instead (the bench leaves this false)
+        public bool  slipping_by_game     { get; set; } = false;
+        public bool  control_powered      => _control_power.State;
         public readonly bool[] compressor_running = new bool[2];
 
         // converter: only 110 V source besides the battery
@@ -324,10 +328,18 @@ internal partial class eu07_sim
                 throw_fast_breaker(false);
         }
 
-        // OPN: overcurrent + earth fault reset; reverser off neutral, wheel at 0 only
+        // OPN: overcurrent + earth fault reset. The reset circuit runs through the reverser, so as in
+        // MaSzyna's RelayReset (DirActive != 0, no-power position, ScndCtrlPos 0, low voltage present):
+        // reverser off neutral, wheel at 0, field at 0, control power on
+        public string? reset_blocked_by =>
+            !_control_power.State                              ? "no control power" :
+            contactors.direction == 0                          ? "the reverser is in neutral" :
+            contactors.wanted != 0 || contactors.position != 0 ? "the controller is not at 0" :
+            contactors.field != 0                              ? "the field shunt is not at 0" : null;
+
         public bool reset_relays()
         {
-            if (contactors.direction != 0 && contactors.wanted == 0 && contactors.position == 0)
+            if (reset_blocked_by == null)
             {
                 overcurrent_tripped = false;
                 earth_fault_tripped = health <= 0.0f;        // dead drivetrain: stays faulted
@@ -520,7 +532,8 @@ internal partial class eu07_sim
             fan_speed = fans_fed ? Math.Max(fan_by_current, fan_by_heat) : 0.0f;
 
             // slip relays: one per armature pair, unfiltered
-            slip_detected = Math.Abs(Math.Abs(named["MA1"].EMF) - Math.Abs(named["MA2"].EMF)) >= slip_relay_volts
+            slip_detected = slipping_by_game && line_contactors_closed
+                         || Math.Abs(Math.Abs(named["MA1"].EMF) - Math.Abs(named["MA2"].EMF)) >= slip_relay_volts
                          || Math.Abs(Math.Abs(named["MA3"].EMF) - Math.Abs(named["MA4"].EMF)) >= slip_relay_volts;
         }
 

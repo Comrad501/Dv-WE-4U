@@ -76,6 +76,7 @@ internal class eu07_wreck : MonoBehaviour
 
     private readonly Dictionary<Renderer, Material[]> _delivered = new();
     private readonly Dictionary<MeshFilter, Mesh> _whole_panes = new();
+    private readonly List<DV.Rain.Window> _stopped = new();
 
     /// <summary>Swap paint and glass: wrecked or delivered.</summary>
     public static void dress(TrainCar car, bool wrecked)
@@ -94,6 +95,10 @@ internal class eu07_wreck : MonoBehaviour
                 if (was.Key != null)
                     was.Key.sharedMesh = was.Value;
             own._whole_panes.Clear();
+            foreach (DV.Rain.Window window in own._stopped)
+                if (window != null)
+                    window.enabled = true;
+            own._stopped.Clear();
             Main.release_log($"EU07 {car.ID}: as delivered again");
             return;
         }
@@ -111,13 +116,25 @@ internal class eu07_wreck : MonoBehaviour
             if (name.StartsWith("EU07_body_eu07_glass", StringComparison.Ordinal)) return wreck[3];
             return null;
         }
+        // the windscreens wear the game's rain material (DV.Rain.Window), not ours: theirs break by being a Window's
+        // pane; the Windows stop while wrecked so the droplets' quality change cannot put their glass back
+        DV.Rain.Window[] rained = car.GetComponentsInChildren<DV.Rain.Window>(true);
+        HashSet<Renderer> rain_panes = new(rained.SelectMany(window => window.visuals).Where(pane => pane != null));
+        foreach (DV.Rain.Window window in rained)
+        {
+            if (window.enabled)
+            {
+                window.enabled = false;
+                own._stopped.Add(window);
+            }
+        }
         int swapped = 0;
         foreach (Renderer shown in car.GetComponentsInChildren<Renderer>(true))
         {
             if (shown == keeper)
                 continue;
             Material[] now = shown.sharedMaterials;
-            Material?[] then = now.Select(swap).ToArray();
+            Material?[] then = rain_panes.Contains(shown) ? now.Select(_ => (Material?)wreck[3]).ToArray() : now.Select(swap).ToArray();
             if (then.All(material => material == null))
                 continue;
             own._delivered[shown] = now;

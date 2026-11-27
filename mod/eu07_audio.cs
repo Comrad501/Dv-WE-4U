@@ -49,6 +49,8 @@ internal class eu07_audio
     private readonly List<loop> _loops = [];
     private readonly System.Random _dice = new();
     private readonly Dictionary<AudioSource, string> _places = [];
+    private readonly List<AudioLowPassFilter> _walls = [];
+    private readonly HashSet<AudioSource> _walled = [];
     private AudioMixer? _mixer;
     private AudioMixerGroup[] _groups = [];
     private string? _all;
@@ -210,6 +212,11 @@ internal class eu07_audio
         source.priority = 24;
         _places[source] = place;
         source.outputAudioMixerGroup = channel(place);
+        if (place != in_the_cab && place != "horn")       // heard from the cab through its walls (eu07_wall)
+        {
+            _walls.Add(eu07_wall.on(holder));
+            _walled.Add(source);
+        }
         return source;
     }
 
@@ -284,7 +291,7 @@ internal class eu07_audio
                 source.mute = _muted || !_aboard;
             }
         }
-        source.PlayOneShot(shot.clips[_dice.Next(shot.clips.Length)], Mathf.Clamp01(shot.gain * loudness));
+        source.PlayOneShot(shot.clips[_dice.Next(shot.clips.Length)], Mathf.Clamp01(shot.gain * loudness) * (_walled.Contains(source) ? eu07_wall.gain : 1.0f));
     }
 
     // table sound for eu07_driver, at its place or another
@@ -350,6 +357,10 @@ internal class eu07_audio
         if (_root == null || _loops.Count == 0)
             return;
         _aboard = PlayerManager.Car == car;
+        float cutoff = eu07_wall.cutoff, wall_gain = eu07_wall.gain;
+        foreach (AudioLowPassFilter wall in _walls)
+            if (wall != null)
+                wall.cutoffFrequency = cutoff;
         foreach (AudioSource in_cab in _cab_sources)
             if (in_cab != null && in_cab.mute != (_muted || !_aboard))
                 in_cab.mute = _muted || !_aboard;
@@ -405,7 +416,7 @@ internal class eu07_audio
                 master = 0.0f;
             float volume = Mathf.Clamp01(read(item.volume_x, item.volume_y, x) * master * item.gain);
             item.source.pitch = Mathf.Clamp(read(item.pitch_x, item.pitch_y, x) * item.detune, 0.05f, 3.0f);
-            item.source.volume = volume;
+            item.source.volume = _walled.Contains(item.source) ? volume * wall_gain : volume;
             asked_all += volume;
             if (_places[item.source] is "motors" or "bogie_a" or "bogie_b")
                 asked_motors += volume;

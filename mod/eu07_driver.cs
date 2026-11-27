@@ -919,6 +919,9 @@ internal class eu07_driver: MonoBehaviour
     // an outside cab door blocks the player only near shut: ajar, its leaf stands over the ladder's top and the
     // climber is pushed off it and falls through the body (VR tester, 0.3.0); fully open it lies along the side
     private const float door_blocks_below_degrees = 10.0f;
+    private bool _trip_seen_over, _trip_seen_earth;
+    private int _trip_flashovers, _trip_grids, _trip_knife_arcs;
+    private int _seen_wanted, _seen_direction, _seen_field;
     private readonly List<door_watch> _doors = [];
     private GameObject? _doors_of;
 
@@ -1101,6 +1104,7 @@ internal class eu07_driver: MonoBehaviour
                 }
                 return $"{marked} contactors marked: soot {soot_given:F2}, heat {heat_given:F2}";
             }
+            case "motors"   : power.motor_celsius = Mathf.Clamp(number, eu07_sim.power_circuit.ambient_celsius, 200.0f); return $"the traction motors at {power.motor_celsius:F0} C (the game's tmHeat follows by its heat input)";
             case "grids"    : power.grid_celsius = Mathf.Clamp(number, eu07_sim.power_circuit.ambient_celsius, eu07_sim.power_circuit.grids_melt_celsius); return $"the resistor grids at {power.grid_celsius:F0} C";
             case "health"   :
                 // health <0-1>: sets the game's electrical drivetrain health
@@ -1147,6 +1151,12 @@ internal class eu07_driver: MonoBehaviour
                        $"{all.Count(one => one.name.StartsWith("[GadgetMeshCollider]"))} cupboard boards";
             }
             case "air"      : _air.bar = Mathf.Clamp(number, 0.0f, 10.0f); return $"pantograph air at {_air.bar:F1} bar";
+            case "mainres"  :
+                // mainres <bar>: the game's main reservoir filled (gauge bar; tests that need air without a compressor run)
+                if (_car.brakeSystem == null)
+                    return "no brake system";
+                _car.brakeSystem.mainReservoirPressure = 1.0f + Mathf.Clamp(number, 0.0f, game_reservoir_limit_bar);
+                return $"main reservoir at {_car.brakeSystem.mainReservoirPressure - 1.0f:F2} bar";
             case "low"      : _low.charge = Mathf.Clamp01(number); return $"110 V battery at {_low.charge * 100.0f:F0} %";
             case "charge"   : power.battery_joules = Mathf.Clamp01(number) * eu07_sim.power_circuit.battery_kWh * 3.6e+6f; return $"battery at {power.battery_charge * 100.0f:F0} %";
             case "audio"    : if (_audio == null) return "no audio"; _audio.muted = number < 0.5f; return $"our sounds muted {_audio.muted}";
@@ -1398,6 +1408,7 @@ internal class eu07_driver: MonoBehaviour
         }
         else
             read_desk_v1(power);
+        anti_slip_brake(power);
         float high = read(port_high_start, _high_switch);
         if ((high > 0.5f) != (_high_switch > 0.5f))
             power.high_start = high > 0.5f;
@@ -1478,11 +1489,16 @@ internal class eu07_driver: MonoBehaviour
         if (take(ref _want_reset))
         {
             // log the reset and what blocked it
-            bool was = power.overcurrent_tripped || power.earth_fault_tripped;
+            // which relays were down is read BEFORE the reset (after it a good reset always shows both clear)
+            bool was_over = power.overcurrent_tripped, was_earth = power.earth_fault_tripped;
+            string? blocked = power.reset_blocked_by;
             bool clear = power.reset_relays();
-            if (was)
+            // a refused reset says why (the game's own notice, flat screen and VR); a dead drivetrain says that
+            if ((was_over || was_earth) && !clear)
+                tell_player(blocked != null ? $"Relays not reset: {blocked}." : "Relays not reset: the earth fault stays (the drivetrain needs repair).");
+            if (was_over || was_earth)
                 Main.release_log($"EU07 {_car.ID}: the relays' reset button: {(clear ? "reset" : "NOT reset")} (reverser {power.contactors.direction}, wheel {power.contactors.wanted}, " +
-                    $"contactors {power.contactors.position}; overload {power.overcurrent_tripped}, earth fault {power.earth_fault_tripped})");
+                    $"contactors {power.contactors.position}; was down: overload {was_over}, earth fault {was_earth}; now: overload {power.overcurrent_tripped}, earth fault {power.earth_fault_tripped})");
         }
         if (take(ref _want_aux_reset))
             power.reset_auxiliary_relays();
@@ -1510,8 +1526,10 @@ internal class eu07_driver: MonoBehaviour
         // 4-axle 83 t loco (~0.08 m/s2 at 100 km/h), as torque against the wheels
         float forward = _car.GetForwardSpeed(), kmh = Mathf.Abs(forward) * 3.6f;
         running_drag_newtons = (drag_newtons_per_kmh * kmh + drag_newtons_per_kmh2 * kmh * kmh) * Mathf.Clamp01(kmh / 2.0f);
-        write(port_torque       , power.wheel_torque - Mathf.Sign(forward) * running_drag_newtons * wheel_radius_metres);
+        float torque_written = power.wheel_torque - Mathf.Sign(forward) * running_drag_newtons * wheel_radius_metres;
+        write(port_torque       , torque_written);
         write(port_line_current , power.line_current);
+        record_tick(power, torque_written, forward);
         // LIGHTS: one game setup per end, by number (eu07_build.cs, make_lights): bits left 1, top 2,
         // right 4, red L 8, red R 16; not-dimmed L/T/R 32/64/128
         // foreign-led: leader's selector (0,0.2 red; 0.4 off; 0.6/0.8/1 white dim->full) overrides own switches
@@ -1825,6 +1843,157 @@ internal class eu07_driver: MonoBehaviour
         }
     }
 
+    // ANTI-SLIP (the EU07's own, all by hand; no automatic action on the original loco):
+    // - LS9 lights from the game's wheelslip (its slip relays compare a pair's EMFs, which never differ here: one RPM port)
+    // - PLP held opens the ZPL valve: a light brake on the locomotive only. MaSzyna's 303E: MaxASBP 1.1 bar of
+    //   MaxBP 4.4, ASB=Manual; kept as that share (a quarter) of the game's full independent application.
+    //   Wound up over plp_windup_seconds rather than at once, so a press does not slam the wheels into a slide
+    //   (a slide under power stops the wheels the motors see: the overload trips, issue #15); on release the
+    //   game vents the cylinder at its own rate. Needs control power (breaker WSS feeds the valve).
+    private const float plp_share_of_full = 1.1f / 4.4f, plp_windup_seconds = 1.5f, game_slip_lamp_from = 0.05f;
+    private float _plp_level;
+    private bool _plp_was_on;
+
+    private void anti_slip_brake(eu07_sim.power_circuit power)
+    {
+        if (_car == null)
+            return;
+        DV.Wheels.AdhesionController? adhesion = _car.adhesionController;
+        power.slipping_by_game = adhesion != null && adhesion.wheelslipController.IsSome(out DV.Wheels.WheelslipController wheel) && wheel.wheelslip >= game_slip_lamp_from;
+
+        bool held = slip_button && power.control_powered;
+        _plp_level = held ? Mathf.Min(plp_share_of_full, _plp_level + plp_share_of_full * Time.fixedDeltaTime / plp_windup_seconds) : 0.0f;
+        if (_car.brakeSystem == null || (!held && !_plp_was_on))
+            return;
+        // the driver's FD1 stays in charge above it; back to it alone when released
+        float driver = _ports.ContainsKey("indBrake.EXT_IN") ? Mathf.Clamp01(read("indBrake.EXT_IN")) : 0.0f;
+        _car.brakeSystem.independentBrakePosition = Mathf.Max(driver, position_for_share(_car.brakeSystem.indBrakeCurve, _plp_level));
+        _plp_was_on = held;
+    }
+
+    // the game shapes the independent brake: pressure share = indBrakeCurve(position) (measured 2026-11-24: position 0.25
+    // gave 0.19 of full). The position that gives this share of full pressure, by bisection on the (rising) curve
+    private static float position_for_share(AnimationCurve? curve, float share)
+    {
+        if (curve == null || share <= 0.0f)
+            return share;
+        float low = 0.0f, high = 1.0f;
+        for (int step = 0; step < 20; ++step)
+        {
+            float middle = (low + high) * 0.5f;
+            if (curve.Evaluate(middle) < share)
+                low = middle;
+            else
+                high = middle;
+        }
+        return high;
+    }
+
+    // LAST SECOND before a trip (issue #15): every physics tick into a ring, the ring into Player.log when a relay drops.
+    // What the electrics wrote and were given back: torque, the wheel RPM port against the train's own, the game's slip
+    // and slide, raw and filtered current, the wheel and the contactors, brake cylinder pressure
+    // (numbers only per tick, words only when dumped: this runs for every player)
+    private struct tick_record
+    {
+        public bool filled;
+        public float time, torque, wheel_rpm, train_rpm, slip, slip_rpm, slide, raw_12, raw_34, relays, cylinder;
+        public int wanted, position, field, direction;
+    }
+    private const int ring_ticks = 60;
+    private readonly tick_record[] _ring = new tick_record[ring_ticks];
+    private int _ring_next;
+
+    private void record_tick(eu07_sim.power_circuit power, float torque_written, float forward)
+    {
+        if (_car == null)
+            return;
+        tick_record now = new tick_record
+        {
+            filled = true, time = Time.fixedTime, torque = torque_written, wheel_rpm = read(port_wheel_RPM),
+            train_rpm = forward * 60.0f / (Mathf.PI * 2.0f * wheel_radius_metres), slip = -1.0f, slide = -1.0f,
+            raw_12 = power.pair_amps_12, raw_34 = power.pair_amps_34, relays = power.relay_amps,
+            cylinder = _car.brakeSystem != null ? _car.brakeSystem.brakeCylinderPressure : 0.0f,
+            wanted = power.contactors.wanted, position = power.contactors.position, field = power.contactors.field, direction = power.contactors.direction,
+        };
+        DV.Wheels.AdhesionController? adhesion = _car.adhesionController;
+        if (adhesion != null)
+        {
+            now.slide = adhesion.wheelSlide;
+            if (adhesion.wheelslipController.IsSome(out DV.Wheels.WheelslipController wheel))
+            {
+                now.slip = wheel.wheelslip;
+                now.slip_rpm = wheel.OrientedMaxWheelslipRpm;
+            }
+        }
+        _ring[_ring_next] = now;
+        _ring_next = (_ring_next + 1) % ring_ticks;
+    }
+
+    // SAND SIGHT GLASSES on the bogies' sand boxes (eu07_build.sand_boxes): the column's height is the game's sand level;
+    // found once on the car (bogies are the outside, always loaded), set twice a second
+    private Transform[]? _sand_levels;
+    private float _sand_shown = -1.0f, _sand_next = 0.0f;
+    private void show_sand()
+    {
+        if (Time.time < _sand_next)
+            return;
+        _sand_next = Time.time + 0.5f;
+        if (_sand_levels == null || _sand_levels.Any(level => level == null))
+        {
+            _sand_levels = _car!.GetComponentsInChildren<Transform>(true).Where(part => part.name == "SandLevel").ToArray();
+            _sand_shown = -1.0f;
+        }
+        float level = Mathf.Clamp01(read("sand.NORMALIZED", 1.0f));
+        if (Mathf.Abs(level - _sand_shown) < 0.005f)
+            return;
+        _sand_shown = level;
+        foreach (Transform column in _sand_levels)
+            column.localScale = new Vector3(1.0f, Mathf.Max(0.001f, level), 1.0f);
+    }
+
+    // the game's notice popup (flat screen and VR), not localised; in the log as well
+    private static void tell_player(string text)
+    {
+        Main.release_log($"EU07 notice: {text}");
+        try
+        {
+            DV.UI.ACanvasController<DV.UI.CanvasController.ElementType>.Instance?.NotificationManager?.ShowNotification(text, null, 5.0f, false, null, false);    // not clearExisting: the game's own notices stay
+        }
+        catch (System.Exception problem)
+        {
+            Main.release_log($"EU07 notice not shown: {problem.Message}");
+        }
+    }
+
+    private void dump_ring()
+    {
+        // every 3rd tick of the last second, oldest first
+        for (int age = ring_ticks - 1; age >= 0; age -= 3)
+        {
+            tick_record one = _ring[(_ring_next + ring_ticks - 1 - age) % ring_ticks];
+            if (one.filled)
+                Main.release_log($"EU07 {_car?.ID}:   before the trip: {one.time:F2} s: torque {one.torque:F0} Nm, wheels {one.wheel_rpm:F0}/train {one.train_rpm:F0} rpm, " +
+                    $"game slip {one.slip:F2} toward {one.slip_rpm:F0} rpm, slide {one.slide:F2}, raw {one.raw_12:F0}/{one.raw_34:F0} A, relays {one.relays:F0} A, " +
+                    $"wheel {one.wanted} at {one.position}, field {one.field}, rev {one.direction}, cylinder {one.cylinder:F2} bar");
+        }
+    }
+
+    // the game's own slip state and the wheel RPM it gives our motors (issue #15: in a slip DV pulls the RPM toward
+    // sign(torque) x 600 rpm, so a torque at or below 0 stops or reverses the wheels under a running motor)
+    private string game_slip()
+    {
+        if (_car == null)
+            return "";
+        float train_rpm = _car.GetForwardSpeed() * 60.0f / (Mathf.PI * 2.0f * wheel_radius_metres);
+        string slip = "no adhesion data";
+        DV.Wheels.AdhesionController? adhesion = _car.adhesionController;
+        if (adhesion != null)
+            slip = adhesion.wheelslipController.IsSome(out DV.Wheels.WheelslipController wheel)
+                ? $"game slip {wheel.wheelslip:F2} toward {wheel.OrientedMaxWheelslipRpm:F0} rpm, slide {adhesion.wheelSlide:F2}"
+                : $"slide {adhesion.wheelSlide:F2}";
+        return $"{slip}; wheels {read(port_wheel_RPM):F0} rpm, train {train_rpm:F0} rpm";
+    }
+
     private static bool key_down(UnityModManagerNet.KeyBinding key)
     {
         if (key == null || key.keyCode == KeyCode.None || !Input.GetKeyDown(key.keyCode))
@@ -1849,18 +2018,47 @@ internal class eu07_driver: MonoBehaviour
             _interior_physics.SyncPosition();
     }
 
+    // SIDE PANES: VR lets go of a puller at the hand's speed and the game's notch snap moves only the position, so an
+    // undamped pane kept sliding, clicking over its steps and never latching (#6). Rigidbody drag would act on ground
+    // speed; a damper in the joint acts on speed against the cab: 30 N s/m on 3 kg stops a let-go pane in ~0.3 s
+    // (window_push in game, 2026-11-27). The joints are the game's (PullerBase.Awake), made with each loaded cab.
+    private const float window_damper = 30.0f;
+    private GameObject? _damped_interior;
+    private float _damp_next;
+
+    private void damp_windows()
+    {
+        GameObject? loaded = _car != null ? _car.loadedInterior : null;
+        if (loaded == null || loaded == _damped_interior || Time.time < _damp_next || _car!.interior == null)
+            return;
+        _damp_next = Time.time + 1.0f;
+        int damped = 0;
+        foreach (DV.CabControls.ControlImplBase pane in _car.interior.GetComponentsInChildren<DV.CabControls.ControlImplBase>(true))
+        {
+            if (!pane.name.StartsWith("C_Window") || !pane.TryGetComponent(out ConfigurableJoint joint))
+                continue;
+            joint.yDrive = new JointDrive { positionSpring = 0.0f, positionDamper = window_damper, maximumForce = float.MaxValue };
+            ++damped;
+        }
+        if (damped >= 4)
+            _damped_interior = loaded;
+    }
+
     void Update()
     {
         eu07_sim.power_circuit? power = _power;
         if (_car != null)
         {
             eu07_vr_log.watch(_car);    // VR only: testers' log of controls grabbed and used
+            damp_windows();
             eu07_hud.step(_car, _live_cab);    // F4 HUD: the live desk's controls
         }
         if (power != null && _car != null)
             watch_doors();
         if (power != null && _car != null)
             watch_contactors(power);
+        if (_car != null)
+            show_sand();
         if (power != null && _car != null)
         {
             // sounds, aboard or not
@@ -1902,6 +2100,39 @@ internal class eu07_driver: MonoBehaviour
             if (_vigilance_button != null && _vigilance_button.IsOn)
                 _vigilance_button.Use();
             _vigilance_key_holds = false;
+        }
+        // TRIP REPORT: one log line when the overload or earth-fault relay drops, with what led to it
+        // (issue #15: trips on 27-25 above 30 km/h in VR that the bench does not reproduce)
+        if (power != null && _car != null)
+        {
+            // in VR, what the hands give the electrics: one line per change of wheel notch, reverser or field step
+            if (VRManager.IsVREnabled() && (power.contactors.wanted != _seen_wanted || power.contactors.direction != _seen_direction || power.contactors.field != _seen_field))
+            {
+                Main.release_log($"EU07 {_car.ID}: hands: wheel {_seen_wanted} -> {power.contactors.wanted}, reverser {_seen_direction} -> {power.contactors.direction}, " +
+                    $"field {_seen_field} -> {power.contactors.field}; {Mathf.Abs(_car.GetForwardSpeed()) * 3.6f:F0} km/h, {power.ammeter_12:F0}/{power.ammeter_34:F0} A");
+                _seen_wanted = power.contactors.wanted;
+                _seen_direction = power.contactors.direction;
+                _seen_field = power.contactors.field;
+            }
+            bool over = power.overcurrent_tripped, earth = power.earth_fault_tripped;
+            bool over_now = over && !_trip_seen_over, earth_now = earth && !_trip_seen_earth;
+            if (over_now || earth_now)
+            {
+                string earth_why = power.flashovers != _trip_flashovers ? "earth fault (commutator flashover: plugging)"
+                    : power.grids_burnt != _trip_grids ? "earth fault (a resistor grid burnt)"
+                    : power.knife_arcs != _trip_knife_arcs ? "earth fault (converter knife opened running)"
+                    : "earth fault (drivetrain health 0)";
+                string why = over_now && earth_now ? "overload and " + earth_why : over_now ? "overload" : earth_why;
+                Main.release_log($"EU07 {_car.ID}: TRIP {why}; {Mathf.Abs(_car.GetForwardSpeed()) * 3.6f:F0} km/h, wheel {power.contactors.wanted} " +
+                    $"(contactors at {power.contactors.position}), field {power.contactors.field}, reverser {power.contactors.direction}, " +
+                    $"broken {power.arc_amps:F0} A, plugging {power.plugging_stress:F2}, health {power.health:F2}; " + game_slip());
+                dump_ring();
+            }
+            _trip_seen_over = over;
+            _trip_seen_earth = earth;
+            _trip_flashovers = power.flashovers;
+            _trip_grids = power.grids_burnt;
+            _trip_knife_arcs = power.knife_arcs;
         }
         // SWITCH KEYS (eu07_mod.settings): flip that switch in the live cab, as a hand would
         if (power != null && player_aboard && _car != null)
@@ -2017,7 +2248,7 @@ internal class eu07_driver: MonoBehaviour
             : $"<color=grey>electrical drivetrain {power.health * 100.0f:F0} %   (a flashover costs {eu07_sim.power_circuit.flashover_damage:F0} hit points; at 0 % the earth fault stays)</color>");
         if (_desk_v2)
         {
-            text.AppendLine($"<color=grey>desk v2   PLP (wheel slip) held: {slip_button}, not wired to anything yet</color>");
+            text.AppendLine($"<color=grey>desk v2   PLP (wheel slip) held: {slip_button}, anti-slip brake at {_plp_level / plp_share_of_full * 100.0f:F0} %, game slip lamp {_power?.slipping_by_game}</color>");
             text.AppendLine("<color=grey>keys: WS on = Starter, WS off = Fuel cutoff, OPN = Starter fuse; keypad 7 1 5 0 9 still work, 3 hides this</color>");
         }
         else
